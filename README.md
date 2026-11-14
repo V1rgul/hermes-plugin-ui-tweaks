@@ -19,14 +19,23 @@ The native **Hide code diffs** setting remains authoritative: switch it off if y
 
 ## Settings
 
-Open **Settings → Plugins → Hermes UI Tweaks**. The page uses Hermes's native settings rows and has six independent switches, all enabled by default:
+Open **Settings → Plugins → Hermes UI Tweaks**. The page groups Hermes's native settings rows into three categories, with six independent switches, all enabled by default:
 
-- **Expand tool-call lists by default** — enabled by default; opens lists without expanding every tool payload.
-- **Fold patches and file edits by default** — enabled by default; folds diffs but leaves them reopenable.
-- **Fold status stack by default** — folds the branch and activity drawer when there are no queued prompts. Hermes already remembers manual folding per conversation, but has no global start-folded preference in the inspected Desktop version. This switch does not enable or disable queue expansion.
-- **Expand queued-prompts section by default** — opens the queue list on additions/updates and reveals its containing drawer if needed, regardless of the status-folding switch. Turning it off leaves the list under native/manual control; enabling it applies to an existing queue immediately.
-- **Expand long queued-prompt text by default** — opens individual long-text disclosures when rows are mounted and interactive. It does not open the queue list or change history messages.
-- **Expand long messages in history by default** — lifts the text clamp/fade from ordinary sent user messages, without clicking their edit buttons. Native spectator/touch expansion controls are opened once and remain manually usable. It does not change queued prompts.
+### Tool calls
+
+- **Lists: expand by default** — opens lists without expanding every tool payload.
+- **File edits: fold diffs by default** — folds patches and file-edit diffs but leaves them reopenable.
+
+### Composer
+
+- **Status stack: fold by default** — folds the branch and activity drawer when there are no queued prompts. Hermes already remembers manual folding per conversation, but has no global start-folded preference in the inspected Desktop version. This switch does not enable or disable queue expansion.
+- **Queued prompts: expand list by default** — opens the queue list on additions/updates and reveals its containing drawer if needed, regardless of the status-folding switch. Turning it off leaves the list under native/manual control; enabling it applies to an existing queue immediately.
+- **Queued prompts: expand long text by default** — opens individual long-text disclosures when rows are mounted and interactive. It does not open the queue list or change history messages.
+
+### Conversation
+
+- **Long messages: expand by default** — lifts the text clamp/fade from ordinary sent user messages, without clicking their edit buttons. Native spectator/touch expansion controls are opened once and remain manually usable. It does not change queued prompts.
+- **HTML previews: full width** — an **Always on** feature row, without a switch. Previews fill the available message width while preserving their content and interaction state.
 
 Changes take effect without reloading. Enabling a native disclosure default also applies it to currently mounted controls that do not already have an explicit choice. Turning one off stops applying it without forcing the opposite layout or clearing manual choices. The ordinary history-message override is reversible styling: turning that setting off immediately restores the native clamp/fade. Full-width previews remain enabled regardless of these switches.
 

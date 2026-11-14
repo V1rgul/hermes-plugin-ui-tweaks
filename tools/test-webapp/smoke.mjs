@@ -161,13 +161,18 @@ async function smoke(page, context, shot) {
 		report.checks.push('adding seeded queue entries reveals the native drawer/list, another addition reopens them, and emptying refolds without creating manual-open preferences')
 
 		await route('/settings?tab=plugins&plugin=hermes-wide-previews%3Asettings')
-		const expandSwitch = page.getByRole('switch', { name: 'Expand tool-call lists by default', exact: true })
-		const foldSwitch = page.getByRole('switch', { name: 'Fold patches and file edits by default', exact: true })
-		const statusSwitch = page.getByRole('switch', { name: 'Fold status stack by default', exact: true })
-		const queueSwitch = page.getByRole('switch', { name: 'Expand queued-prompts section by default', exact: true })
-		const queuedTextSwitch = page.getByRole('switch', { name: 'Expand long queued-prompt text by default', exact: true })
-		const historySwitch = page.getByRole('switch', { name: 'Expand long messages in history by default', exact: true })
+		const expandSwitch = page.getByRole('switch', { name: 'Lists: expand by default', exact: true })
+		const foldSwitch = page.getByRole('switch', { name: 'File edits: fold diffs by default', exact: true })
+		const statusSwitch = page.getByRole('switch', { name: 'Status stack: fold by default', exact: true })
+		const queueSwitch = page.getByRole('switch', { name: 'Queued prompts: expand list by default', exact: true })
+		const queuedTextSwitch = page.getByRole('switch', { name: 'Queued prompts: expand long text by default', exact: true })
+		const historySwitch = page.getByRole('switch', { name: 'Long messages: expand by default', exact: true })
 		await expandSwitch.waitFor()
+		for (const title of ['Tool calls', 'Composer', 'Conversation']) await page.getByRole('heading', { name: title, exact: true }).waitFor()
+		const previewRow = page.getByText('HTML previews: full width', { exact: true }).locator('xpath=ancestor::div[contains(@class, "@container")][1]')
+		check(await previewRow.getByText('Always on', { exact: true }).count() === 1, 'Full-width previews must be visible as an always-on feature')
+		check(await previewRow.locator('button, input, [role="switch"]').count() === 0, 'The always-on feature must not have a toggle, including a disabled one')
+		report.checks.push('categorized settings and a native full-width preview row without a switch')
 		check(await expandSwitch.getAttribute('aria-checked') === 'true', 'Native settings must show expand enabled')
 		await expandSwitch.click()
 		check(await expandSwitch.getAttribute('aria-checked') === 'false', 'Native switch must turn off')
@@ -251,7 +256,7 @@ async function smoke(page, context, shot) {
 		return report
 	} finally {
 		await route('/settings?tab=plugins&plugin=hermes-wide-previews%3Asettings')
-		await page.getByRole('switch', { name: 'Fold status stack by default', exact: true }).waitFor()
+		await page.getByRole('switch', { name: 'Status stack: fold by default', exact: true }).waitFor()
 		await page.evaluate(saved => {
 			for (const [key, value] of Object.entries(saved)) {
 				if (value === null) localStorage.removeItem(key)

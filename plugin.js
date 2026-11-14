@@ -1,4 +1,4 @@
-import { host, ToggleRow } from '@hermes/plugin-sdk'
+import { host, ListRow, ToggleRow } from '@hermes/plugin-sdk'
 import { useState } from 'react'
 import { jsx, jsxs } from 'react/jsx-runtime'
 
@@ -12,50 +12,81 @@ function readPreferences(storage) {
 	return Object.fromEntries(Object.entries(defaultPreferences).map(([key, fallback]) => [key, typeof saved?.[key] === 'boolean' ? saved[key] : fallback]))
 }
 
+function SettingsGroup({ title, children }) {
+	return jsxs('section', {
+		'aria-label': title,
+		className: 'mb-6',
+		children: [
+			jsx('h3', { className: 'mb-2.5 pt-2 text-[length:var(--conversation-text-font-size)] font-medium', children: title }),
+			children
+		]
+	})
+}
+
 function SettingsPage({ getPreferences, updatePreference }) {
 	const [preferences, setPreferences] = useState(getPreferences)
 	const change = key => on => setPreferences(updatePreference(key, on))
 	return jsxs('div', {
 		children: [
-			jsx(ToggleRow, {
-				label: 'Expand tool-call lists by default',
-				description: 'Show the list of calls without opening every call’s input/output details.',
-				checked: preferences.expandToolCalls,
-				onChange: change('expandToolCalls')
+			jsxs(SettingsGroup, {
+				title: 'Tool calls',
+				children: [
+					jsx(ToggleRow, {
+						label: 'Lists: expand by default',
+						description: 'Show the list of calls without opening every call’s input/output details.',
+						checked: preferences.expandToolCalls,
+						onChange: change('expandToolCalls')
+					}),
+					jsx(ToggleRow, {
+						label: 'File edits: fold diffs by default',
+						description: 'Keep patches and file-edit diffs closed until you open them. Leave Hermes “Hide code diffs” off to keep them reopenable.',
+						checked: preferences.foldFileEdits,
+						onChange: change('foldFileEdits')
+					})
+				]
 			}),
-			jsx(ToggleRow, {
-				label: 'Fold patches and file edits by default',
-				description: 'Keep diffs closed until you open them. Leave Hermes “Hide code diffs” off to keep them reopenable.',
-				checked: preferences.foldFileEdits,
-				onChange: change('foldFileEdits')
+			jsxs(SettingsGroup, {
+				title: 'Composer',
+				children: [
+					jsx(ToggleRow, {
+						label: 'Status stack: fold by default',
+						description: 'Start the branch and activity drawer folded when the queue is empty. Queue expansion is controlled separately below.',
+						checked: preferences.foldStatusStack,
+						onChange: change('foldStatusStack')
+					}),
+					jsx(ToggleRow, {
+						label: 'Queued prompts: expand list by default',
+						description: 'Open the queue list when prompts are added or updated, revealing its drawer if necessary. Works independently of status-stack folding.',
+						checked: preferences.expandQueuedPrompts,
+						onChange: change('expandQueuedPrompts')
+					}),
+					jsx(ToggleRow, {
+						label: 'Queued prompts: expand long text by default',
+						description: 'Use each queued prompt’s native expanded text view, without opening a closed queue list.',
+						checked: preferences.expandQueuedPromptText,
+						onChange: change('expandQueuedPromptText')
+					})
+				]
 			}),
-			jsx(ToggleRow, {
-				label: 'Fold status stack by default',
-				description: 'Start the branch and activity drawer folded when the queue is empty. Queue expansion is controlled separately below.',
-				checked: preferences.foldStatusStack,
-				onChange: change('foldStatusStack')
-			}),
-			jsx(ToggleRow, {
-				label: 'Expand queued-prompts section by default',
-				description: 'Open the queue list when prompts are added or updated, revealing its drawer if necessary. Works independently of status-stack folding.',
-				checked: preferences.expandQueuedPrompts,
-				onChange: change('expandQueuedPrompts')
-			}),
-			jsx(ToggleRow, {
-				label: 'Expand long queued-prompt text by default',
-				description: 'Use each queued prompt’s native expanded text view, without opening a closed queue list.',
-				checked: preferences.expandQueuedPromptText,
-				onChange: change('expandQueuedPromptText')
-			}),
-			jsx(ToggleRow, {
-				label: 'Expand long messages in history by default',
-				description: 'Show sent user prompts without the text clamp/fade. Editing and restore actions stay unchanged.',
-				checked: preferences.expandHistoryPrompts,
-				onChange: change('expandHistoryPrompts')
+			jsxs(SettingsGroup, {
+				title: 'Conversation',
+				children: [
+					jsx(ToggleRow, {
+						label: 'Long messages: expand by default',
+						description: 'Show sent user prompts without the text clamp/fade. Editing and restore actions stay unchanged.',
+						checked: preferences.expandHistoryPrompts,
+						onChange: change('expandHistoryPrompts')
+					}),
+					jsx(ListRow, {
+						title: 'HTML previews: full width',
+						description: 'Use the full available message width without changing preview content or state.',
+						action: jsx('span', { className: 'text-sm text-(--ui-text-secondary)', children: 'Always on' })
+					})
+				]
 			}),
 			jsx('p', {
 				className: 'mt-4 text-sm text-(--ui-text-secondary)',
-				children: 'Changes apply without reloading. Turning a default off leaves the current layout unchanged. Manual choices are retained; queue updates can reopen the status drawer. HTML previews stay full width.'
+				children: 'Changes apply without reloading. Turning a default off leaves the current layout unchanged. Manual choices are retained; queue updates can reopen the status drawer.'
 			})
 		]
 	})

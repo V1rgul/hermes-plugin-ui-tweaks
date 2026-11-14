@@ -8,7 +8,7 @@ const source = await readFile(process.env.PLUGIN_SOURCE || new URL('../plugin.js
 const preferenceKey = 'hermes.plugin.hermes-wide-previews.preferences'
 const nativeKey = 'hermes.desktop.collapsedStatusDrawers.v1'
 const opensKey = 'hermes.plugin.hermes-wide-previews.openStatusDrawers'
-const label = 'Fold status stack by default'
+const label = 'Status stack: fold by default'
 let browser
 before(async () => { browser = await chromium.launch({ headless: true, ...(process.env.CHROMIUM_EXECUTABLE ? { executablePath: process.env.CHROMIUM_EXECUTABLE } : {}) }) })
 after(async () => { await browser?.close() })
@@ -141,7 +141,7 @@ test('the new switch is independent, applies live, persists false, and does not 
 		assert.equal(await page.getByRole('switch', { name: label }).getAttribute('aria-checked'), 'false')
 		await page.getByRole('switch', { name: label }).click()
 		await expanded(page, false)
-		for (const name of ['Expand tool-call lists by default', 'Fold patches and file edits by default']) assert.equal(await page.getByRole('switch', { name, exact: true }).getAttribute('aria-checked'), 'true')
+		for (const name of ['Lists: expand by default', 'File edits: fold diffs by default']) assert.equal(await page.getByRole('switch', { name, exact: true }).getAttribute('aria-checked'), 'true')
 		await page.getByRole('switch', { name: label }).click()
 		await expanded(page, false)
 		assert.equal(await page.evaluate(key => JSON.parse(localStorage.getItem(key)).foldStatusStack, preferenceKey), false)
@@ -345,7 +345,7 @@ test('a queue opens only its own controlled composer and unrelated activity neve
 
 test('queue and status switches apply independently without reload and persist separately', async () => {
 	const page = await fixture({}, { foldStatusStack: false, expandQueuedPrompts: false })
-	const queueLabel = 'Expand queued-prompts section by default'
+	const queueLabel = 'Queued prompts: expand list by default'
 	try {
 		await activatePlugin(page, source)
 		await settings(page)

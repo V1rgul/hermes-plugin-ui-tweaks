@@ -285,8 +285,8 @@ test('applies defaults when previously inert activity becomes interactive', asyn
 	} finally { await page.close() }
 })
 
-const expandLabel = 'Expand tool-call lists by default'
-const foldLabel = 'Fold patches and file edits by default'
+const expandLabel = 'Lists: expand by default'
+const foldLabel = 'File edits: fold diffs by default'
 const preferenceStorageKey = 'hermes.plugin.hermes-wide-previews.preferences'
 async function showSettings(page) {
 	await page.evaluate(() => window.mountPluginSettings())
@@ -295,6 +295,22 @@ async function showSettings(page) {
 async function expectChecked(page, label, checked) {
 	await page.waitForFunction(({ label, checked }) => Array.from(document.querySelectorAll('[role="switch"]')).find(el => el.getAttribute('aria-label') === label)?.getAttribute('aria-checked') === String(checked), { label, checked }, { timeout: 3000 })
 }
+
+test('settings group controls and show full-width previews as a noninteractive feature', async () => {
+	const page = await fixture([{ id: 'run', rows: [ordinary, edit] }])
+	try {
+		await activate(page)
+		await showSettings(page)
+		const settings = page.locator('#plugin-settings')
+		assert.equal(await settings.getByRole('region', { name: 'Tool calls', exact: true }).getByRole('switch', { name: expandLabel, exact: true }).count(), 1)
+		assert.equal(await settings.getByRole('region', { name: 'Composer', exact: true }).getByRole('switch', { name: 'Status stack: fold by default', exact: true }).count(), 1)
+		const conversation = settings.getByRole('region', { name: 'Conversation', exact: true })
+		const previewRow = conversation.getByText('HTML previews: full width', { exact: true }).locator('..')
+		assert.equal(await previewRow.getByText('Always on', { exact: true }).count(), 1)
+		assert.equal(await previewRow.locator('button, input, [role="switch"]').count(), 0)
+		assert.equal(await settings.getByRole('switch').count(), 6)
+	} finally { await page.close() }
+})
 
 test('settings switches independently control live defaults without reloading', async () => {
 	const page = await fixture([{ id: 'run', rows: [ordinary, edit] }])

@@ -6,8 +6,8 @@ import { activatePlugin } from './plugin-host.mjs'
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const source = await readFile(process.env.PLUGIN_SOURCE || new URL('../plugin.js', import.meta.url), 'utf8')
 const preferencesKey = 'hermes.plugin.hermes-wide-previews.preferences'
-const queuedLabel = 'Expand long queued-prompt text by default'
-const historyLabel = 'Expand long messages in history by default'
+const queuedLabel = 'Queued prompts: expand long text by default'
+const historyLabel = 'Long messages: expand by default'
 let browser
 before(async () => { browser = await chromium.launch({ headless: true, ...(process.env.CHROMIUM_EXECUTABLE ? { executablePath: process.env.CHROMIUM_EXECUTABLE } : {}) }) })
 after(async () => { await browser?.close() })
