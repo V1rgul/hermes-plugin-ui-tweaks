@@ -8,7 +8,10 @@ async function smoke(page, context, shot) {
 	const disclosuresKey = 'hermes.desktop.toolDisclosure.v1'
 	const hideDiffsKey = 'hermes.desktop.toolView.hideCodeDiffs'
 	const decisionsKey = 'hermes.desktop.pluginDecisions.v2'
-	const keys = [preferencesKey, disclosuresKey, hideDiffsKey, decisionsKey]
+	const drawersKey = 'hermes.desktop.collapsedStatusDrawers.v1'
+	const opensKey = 'hermes.plugin.hermes-wide-previews.openStatusDrawers'
+	const queueKey = 'hermes.desktop.composerQueue.v1'
+	const keys = [preferencesKey, disclosuresKey, hideDiffsKey, decisionsKey, drawersKey, opensKey, queueKey]
 	const saved = await page.evaluate(keys => Object.fromEntries(keys.map(key => [key, localStorage.getItem(key)])), keys)
 	const errors = []
 	page.on('pageerror', error => errors.push(error.message))
@@ -29,6 +32,31 @@ async function smoke(page, context, shot) {
 		await page.evaluate(hash => { location.hash = hash }, hash)
 	}
 	const groupToggle = () => page.locator('[data-tool-group] > [data-tool-summary] button[aria-expanded]').first()
+	const statusToggle = () => page.locator('[data-slot="status-drawer-toggle"]').first()
+	const queueToggle = () => page.locator('[data-slot="composer-status-stack"] .status-section-trigger:has(.codicon-layers, .codicon-debug-pause)').first()
+	const queuedTextToggle = () => page.locator('[data-slot="status-row"]').filter({ hasText: 'Invented queued prompt 1 — renderer test only' }).locator('.status-row-actions button[aria-expanded]').first()
+	const historyExpanded = async expected => {
+		await page.getByText('Invented long history prompt — renderer test only', { exact: false }).waitFor()
+		await page.waitForFunction(expected => {
+			const el = document.querySelector('[data-slot="aui_user-message-root"] .sticky-human-clamp')
+			return el && (el.clientHeight >= el.scrollHeight) === expected
+		}, expected)
+	}
+	const setQueue = async count => {
+		// Invented input through the real cross-window queue store, not replacement DOM/SDK or a model turn.
+		// Server-owned rows are excluded from both native auto-drainers; never submit these test prompts.
+		await page.evaluate(({ key, count }) => {
+			const oldValue = localStorage.getItem(key)
+			const state = JSON.parse(oldValue || '{}')
+			if (count) state['ui-tweaks-example-preview'] = Array.from({ length: count }, (_, index) => ({
+				id: `ui-tweaks-queue-${index}`, text: `Invented queued prompt ${index + 1} — renderer test only\n` + Array.from({ length: 8 }, (_, line) => `Long queued text line ${line + 1}`).join('\n'), attachments: [], queuedAt: Date.now(), serverStatus: 'queued'
+			}))
+			else delete state['ui-tweaks-example-preview']
+			const newValue = JSON.stringify(state)
+			localStorage.setItem(key, newValue)
+			window.dispatchEvent(new StorageEvent('storage', { key, oldValue, newValue, storageArea: localStorage, url: location.href }))
+		}, { key: queueKey, count })
+	}
 	const editToggle = () => page.locator('[data-tool-row]').filter({ hasText: 'example.txt' }).filter({ has: page.locator('button[aria-expanded]') }).last().locator('button[aria-expanded]').first()
 	const expanded = async (locator, expected) => {
 		await locator.waitFor()
@@ -40,13 +68,16 @@ async function smoke(page, context, shot) {
 		await locator.evaluate(el => el.removeAttribute('data-smoke-toggle'))
 	}
 	try {
-		await page.evaluate(({ preferencesKey, disclosuresKey, hideDiffsKey, decisionsKey }) => {
-			localStorage.setItem(preferencesKey, JSON.stringify({ expandToolCalls: true, foldFileEdits: true }))
+		await page.evaluate(({ preferencesKey, disclosuresKey, hideDiffsKey, decisionsKey, drawersKey, opensKey, queueKey }) => {
+			localStorage.setItem(preferencesKey, JSON.stringify({ expandToolCalls: true, foldFileEdits: true, foldStatusStack: true, expandQueuedPrompts: true, expandQueuedPromptText: true, expandHistoryPrompts: true }))
 			localStorage.removeItem(disclosuresKey)
+			localStorage.removeItem(drawersKey)
+			localStorage.removeItem(opensKey)
+			localStorage.removeItem(queueKey)
 			localStorage.setItem(hideDiffsKey, 'false')
 			const decisions = JSON.parse(localStorage.getItem(decisionsKey) || '{}')
 			localStorage.setItem(decisionsKey, JSON.stringify({ ...decisions, 'hermes-wide-previews': true }))
-		}, { preferencesKey, disclosuresKey, hideDiffsKey, decisionsKey })
+		}, { preferencesKey, disclosuresKey, hideDiffsKey, decisionsKey, drawersKey, opensKey, queueKey })
 		await page.reload()
 		await ready()
 		await route('/ui-tweaks-example-tools')
@@ -55,11 +86,30 @@ async function smoke(page, context, shot) {
 		check(await page.locator('[data-tool-row]').count() >= 3, 'Real tool group must render its read/search rows and the separate edit')
 		const indentation = await page.locator('[data-tool-group]').first().evaluate(el => {
 			const summary = el.querySelector('[data-tool-summary]').getBoundingClientRect()
-			const row = el.querySelector('[data-tool-row]').getBoundingClientRect()
+			const row = el.querySelector('[data-tool-row] > div:first-child').getBoundingClientRect()
 			return row.x - summary.x
 		})
 		check(Math.abs(indentation - 16) < 1, `Tool indentation must be 16px, got ${indentation}`)
 		report.checks.push('native tool group expanded, edit folded, rows indented 16px')
+		const connectors = await page.locator('[data-tool-group]').first().evaluate(el => {
+			const summary = el.querySelector('[data-tool-summary]').getBoundingClientRect()
+			return { summaryBottom: summary.bottom, rows: Array.from(el.querySelectorAll(':scope > div > [data-tool-row]'), row => {
+				const rect = row.getBoundingClientRect()
+				const before = getComputedStyle(row, '::before')
+				const after = getComputedStyle(row, '::after')
+				return { content: before.content, top: rect.top + parseFloat(before.top), bottom: rect.top + parseFloat(before.top) + parseFloat(before.height), branch: rect.top + parseFloat(after.top), stroke: before.borderInlineStartWidth, branchStroke: after.borderBlockStartWidth, pointerEvents: before.pointerEvents }
+			}) }
+		})
+		check(connectors.rows.length >= 2, 'Native group must expose multiple branches')
+		check(Math.abs(connectors.rows[0].top - connectors.summaryBottom) < 1, 'Tree rail must join the native summary without a gap')
+		for (const [index, line] of connectors.rows.entries()) {
+			check(line.content === '""' && line.stroke === '1px' && line.branchStroke === '1px', 'Each native row must paint both connector strokes')
+			check(line.pointerEvents === 'none', 'Connectors must not intercept native controls')
+			if (index) check(Math.abs(connectors.rows[index - 1].bottom - line.top) < 1, 'Native tree rail must stay continuous between calls')
+		}
+		check(Math.abs(connectors.rows.at(-1).bottom - connectors.rows.at(-1).branch) < 1, 'Last native branch must end in an L')
+		report.checks.push('continuous tree rail from summary to calls, final L, noninteractive decoration')
+		report.treeScreenshot = await shot('integration-tool-tree')
 		await editToggle().click()
 		await page.locator('[data-tool-row] [data-slot="file-diff-panel"]').waitFor()
 		check((await page.locator('[data-tool-row] [data-slot="file-diff-panel"]').innerText()).includes('After the invented edit.'), 'Native diff contents must reopen')
@@ -73,19 +123,102 @@ async function smoke(page, context, shot) {
 		report.checks.push('manual group/diff choices survive a real app reload')
 		report.toolsScreenshot = await shot('integration-tools')
 
+		await expanded(statusToggle(), false)
+		await page.locator('.coding-status-bar').waitFor({ state: 'attached' })
+		check(await page.locator('.coding-status-bar').isVisible() === false, 'Folded native drawer must hide the branch row')
+		await statusToggle().click()
+		await expanded(statusToggle(), true)
+		await page.locator('.coding-status-bar').waitFor({ state: 'visible' })
+		check((await page.locator('.coding-status-bar').innerText()).includes('ui-tweaks-test'), 'Grip must reopen the real test branch')
+		await page.reload()
+		await ready()
+		await route('/ui-tweaks-example-tools')
+		await expanded(statusToggle(), true)
+		await route('/ui-tweaks-example-preview')
+		await expanded(statusToggle(), false)
+		await route('/ui-tweaks-example-tools')
+		await expanded(statusToggle(), true)
+		report.checks.push('native branch drawer starts folded, reopens with its grip, and preserves per-session manual opens across reload/navigation')
+
+		await route('/ui-tweaks-example-preview')
+		await page.locator('iframe[src*="/assets/webapp-preview.html"]').waitFor({ state: 'attached' })
+		await expanded(statusToggle(), false)
+		await setQueue(1)
+		await expanded(statusToggle(), true)
+		await expanded(queueToggle(), true)
+		await page.getByText('Invented queued prompt 1 — renderer test only', { exact: false }).waitFor()
+		await expanded(queuedTextToggle(), true)
+		await queueToggle().click()
+		await statusToggle().click()
+		await expanded(statusToggle(), false)
+		await setQueue(2)
+		await expanded(statusToggle(), true)
+		await expanded(queueToggle(), true)
+		await page.getByText('Invented queued prompt 2 — renderer test only', { exact: false }).waitFor()
+		check(await page.evaluate(key => (JSON.parse(localStorage.getItem(key) || '[]')).every(scope => JSON.parse(scope)[3] !== 'ui-tweaks-example-preview'), opensKey), 'Automatic queue reveals must not create a saved manual-open choice')
+		await setQueue(0)
+		await expanded(statusToggle(), false)
+		report.checks.push('adding seeded queue entries reveals the native drawer/list, another addition reopens them, and emptying refolds without creating manual-open preferences')
+
 		await route('/settings?tab=plugins&plugin=hermes-wide-previews%3Asettings')
-		const expandSwitch = page.getByRole('switch', { name: 'Expand tool-call lists by default', exact: true })
-		const foldSwitch = page.getByRole('switch', { name: 'Fold patches and file edits by default', exact: true })
+		const expandSwitch = page.getByRole('switch', { name: 'Lists: expand by default', exact: true })
+		const foldSwitch = page.getByRole('switch', { name: 'File edits: fold diffs by default', exact: true })
+		const statusSwitch = page.getByRole('switch', { name: 'Status stack: fold by default', exact: true })
+		const queueSwitch = page.getByRole('switch', { name: 'Queued prompts: expand list by default', exact: true })
+		const queuedTextSwitch = page.getByRole('switch', { name: 'Queued prompts: expand long text by default', exact: true })
+		const historySwitch = page.getByRole('switch', { name: 'Long messages: expand by default', exact: true })
 		await expandSwitch.waitFor()
+		for (const title of ['Tool calls', 'Composer', 'Conversation']) await page.getByRole('heading', { name: title, exact: true }).waitFor()
+		const previewRow = page.getByText('HTML previews: full width', { exact: true }).locator('xpath=ancestor::div[contains(@class, "@container")][1]')
+		check(await previewRow.getByText('Always on', { exact: true }).count() === 1, 'Full-width previews must be visible as an always-on feature')
+		check(await previewRow.locator('button, input, [role="switch"]').count() === 0, 'The always-on feature must not have a toggle, including a disabled one')
+		report.checks.push('categorized settings and a native full-width preview row without a switch')
 		check(await expandSwitch.getAttribute('aria-checked') === 'true', 'Native settings must show expand enabled')
 		await expandSwitch.click()
 		check(await expandSwitch.getAttribute('aria-checked') === 'false', 'Native switch must turn off')
 		check(await foldSwitch.getAttribute('aria-checked') === 'true', 'Independent fold switch must stay on')
+		check(await statusSwitch.getAttribute('aria-checked') === 'true', 'Status-stack default must start enabled')
+		await statusSwitch.click()
+		check(await statusSwitch.getAttribute('aria-checked') === 'false', 'Status-stack switch must turn off independently')
+		for (const control of [queueSwitch, queuedTextSwitch, historySwitch]) check(await control.getAttribute('aria-checked') === 'true', 'Each prompt setting must start enabled independently')
+		await queuedTextSwitch.click()
+		await historySwitch.click()
+		check(await queueSwitch.getAttribute('aria-checked') === 'true', 'Disabling text defaults must not disable queue expansion')
 		await page.reload()
 		await ready()
 		await route('/settings?tab=plugins&plugin=hermes-wide-previews%3Asettings')
 		await expandSwitch.waitFor()
 		check(await expandSwitch.getAttribute('aria-checked') === 'false', 'Native SDK storage must persist the switch')
+		check(await statusSwitch.getAttribute('aria-checked') === 'false', 'Native SDK storage must persist the status-stack switch')
+		for (const control of [queuedTextSwitch, historySwitch]) check(await control.getAttribute('aria-checked') === 'false', 'Text switches must persist independently')
+		await route('/ui-tweaks-example-long-prompts')
+		await historyExpanded(false)
+		await route('/ui-tweaks-example-preview')
+		await page.locator('iframe[src*="/assets/webapp-preview.html"]').waitFor({ state: 'attached' })
+		await setQueue(1)
+		await expanded(statusToggle(), true)
+		await expanded(queueToggle(), true)
+		await expanded(queuedTextToggle(), false)
+		report.checks.push('queue list expands with status folding disabled while long queued text and history remain independently collapsed')
+		await route('/settings?tab=plugins&plugin=hermes-wide-previews%3Asettings')
+		await queueSwitch.waitFor()
+		await queueSwitch.click()
+		await queuedTextSwitch.click()
+		await historySwitch.click()
+		await route('/ui-tweaks-example-preview')
+		await page.locator('iframe[src*="/assets/webapp-preview.html"]').waitFor({ state: 'attached' })
+		await expanded(queueToggle(), false)
+		await queueToggle().click()
+		await expanded(queuedTextToggle(), true)
+		await setQueue(0)
+		await expanded(statusToggle(), true)
+		await route('/ui-tweaks-example-long-prompts')
+		await historyExpanded(true)
+		check(await page.locator('[data-slot="aui_edit-composer-root"]').count() === 0, 'Expanding history must not open the native edit composer')
+		report.checks.push('long queued text does not open its closed list; long history expands without triggering editing')
+		await route('/settings?tab=plugins&plugin=hermes-wide-previews%3Asettings')
+		await queueSwitch.waitFor()
+		await queueSwitch.click()
 		report.settingsScreenshot = await shot('integration-settings')
 		report.checks.push('real SDK settings render, independent switch updates and reload persistence')
 
@@ -122,6 +255,8 @@ async function smoke(page, context, shot) {
 		report.checks.push('no uncaught renderer errors')
 		return report
 	} finally {
+		await route('/settings?tab=plugins&plugin=hermes-wide-previews%3Asettings')
+		await page.getByRole('switch', { name: 'Status stack: fold by default', exact: true }).waitFor()
 		await page.evaluate(saved => {
 			for (const [key, value] of Object.entries(saved)) {
 				if (value === null) localStorage.removeItem(key)

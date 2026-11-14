@@ -19,7 +19,7 @@ npm run webapp -- setup && npm run webapp -- seed && npm run webapp -- browser &
 ```
 
 - `setup` creates/reuses a container for this exact checkout and copies its current, possibly uncommitted `plugin.js` into the real Desktop plugin directory. This is a standalone UI plugin: no backend component or enablement helper is needed.
-- `seed` writes two clearly labeled invented conversations through Hermes's own `SessionDB`: grouped tool calls with a patch diff, and an interactive HTML preview served from the test workspace. Rerunning preserves existing sessions, including manual test conversations. It does not call a model or manufacture a claimed live execution.
+- `seed` writes clearly labeled invented conversations through Hermes's own `SessionDB`: grouped tool calls with a patch diff, an interactive HTML preview served from the test workspace, and a multiline history prompt. It initializes an empty test-only Git repo for the native branch row, without a commit or credentials. Rerunning preserves existing sessions, including manual test conversations. It does not call a model or manufacture a claimed live execution.
 - `browser` starts ordinary headless Chromium on the host and signs it in through a one-use link from the container. The browser persists between `drive` calls. Its profile holds localStorage, plugin preferences and sign-in state; normal sync/start/stop never reset it.
 - `test:integration` drives this real workspace and checks native rendering, settings, defaults, manual overrides, preview sizing and interaction. It uses only seeded data, with no model request. It restores the preferences and disclosure choices it changes.
 

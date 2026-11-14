@@ -59,16 +59,17 @@ async function geometry(page, id = 'group') {
 		const group = rect(`#${id}`)
 		const header = rect(`#${id} > [data-tool-summary]`)
 		const first = rect(`#${id}-one`)
+		const firstContent = rect(`#${id}-one > div:first-child`)
 		const second = rect(`#${id}-two`)
 		return {
-			indentLeft: first.left - header.left,
-			indentRight: header.right - first.right,
+			indentLeft: firstContent.left - header.left,
+			indentRight: header.right - firstContent.right,
 			rowGap: second.top - first.bottom,
 			rowHeight: first.height,
 			rowStride: second.top - first.top,
 			headerGap: first.top - header.bottom,
 			groupWidth: group.width,
-			rowWidth: first.width,
+			rowWidth: firstContent.width,
 
 			leadingBoundary: rect('#group').top - rect('#before').bottom,
 			trailingBoundary: rect('#after').top - rect('#standalone-read').bottom,
@@ -80,6 +81,67 @@ async function geometry(page, id = 'group') {
 		}
 	}, id)
 }
+
+async function connectors(page, selector = '#group > .list > [data-tool-row]') {
+	return page.locator(selector).evaluateAll(rows => rows.map(row => {
+		const rect = row.getBoundingClientRect()
+		const content = row.firstElementChild.getBoundingClientRect()
+		const before = getComputedStyle(row, '::before')
+		const after = getComputedStyle(row, '::after')
+		const rtl = getComputedStyle(row).direction === 'rtl'
+		const x = rtl ? rect.right - parseFloat(before.right) : rect.left + parseFloat(before.left)
+		return {
+			content: before.content,
+			start: rect.top + parseFloat(before.top),
+			end: rect.top + parseFloat(before.top) + parseFloat(before.height),
+			branch: rect.top + parseFloat(after.top),
+			branchWidth: parseFloat(after.width),
+			stroke: parseFloat(before.borderInlineStartWidth),
+			branchStroke: parseFloat(after.borderBlockStartWidth),
+			pointerEvents: before.pointerEvents,
+			x,
+			contentEdge: rtl ? content.right : content.left,
+			rowBottom: rect.bottom,
+			headerMiddle: content.top + content.height / 2
+		}
+	}))
+}
+
+test('connects each indented header without gaps and stops at the last header, not its expanded result', async () => {
+	const page = await fixture()
+	try {
+		await activatePlugin(page, source)
+		for (const direction of ['ltr', 'rtl']) {
+			await page.evaluate(direction => { document.documentElement.dir = direction }, direction)
+			const lines = await connectors(page)
+			const summaryBottom = await page.locator('#group > [data-tool-summary]').evaluate(el => el.getBoundingClientRect().bottom)
+			assert.equal(lines[0].start, summaryBottom, 'the rail must attach directly below the summary')
+			for (const [index, line] of lines.entries()) {
+				assert.equal(line.content, '""')
+				assert.equal(line.stroke, 1, 'the vertical rail must actually be painted')
+				assert.equal(line.branchStroke, 1, 'each header must have a painted horizontal branch')
+				assert.equal(line.pointerEvents, 'none', 'decoration must not intercept the native controls')
+				assert.equal(line.branch, line.headerMiddle, 'branches must align with headers rather than full result heights')
+				assert.ok(direction === 'rtl' ? line.x - line.branchWidth > line.contentEdge : line.x + line.branchWidth < line.contentEdge, 'branches must remain inside the indentation gutter')
+				if (index) assert.equal(lines[index - 1].end, line.start, 'successive strokes must join without a break')
+			}
+			assert.equal(lines.at(-1).end, lines.at(-1).branch, 'the final L must end at its horizontal branch')
+			assert.ok(lines.at(-1).end < lines.at(-1).rowBottom, 'an expanded last result must not extend the rail')
+		}
+		for (const selector of ['#single-row', '#standalone-read', '#outside-one']) {
+			assert.equal((await connectors(page, selector))[0].content, 'none', 'ungrouped and outside-scope calls must have no connector')
+		}
+		await page.locator('#group > .list').evaluate((list, markup) => list.insertAdjacentHTML('beforeend', markup), row('appended'))
+		const appended = await connectors(page)
+		assert.equal(appended.at(-2).end, appended.at(-1).start, 'a newly appended call must extend the old last branch')
+		assert.equal(appended.at(-1).end, appended.at(-1).branch)
+		await page.locator('#appended').evaluate(el => el.remove())
+		const removed = await connectors(page)
+		assert.equal(removed.at(-1).end, removed.at(-1).branch, 'removing the last call must shorten the rail again')
+		await page.evaluate(() => window.disposePlugin())
+		assert.equal((await connectors(page))[0].content, 'none', 'disabling must remove every connector')
+	} finally { await page.close() }
+})
 
 test('indents grouped calls, compacts only tool gaps, and restores original geometry on disable', async () => {
 	const page = await fixture()
@@ -129,6 +191,14 @@ test('uses logical indentation for RTL and does not disturb the running ticker s
 		const tickerAfter = await geometry(page, 'live')
 		assert.ok(tickerAfter.indentLeft > tickerBefore.indentLeft)
 		for (const key of ['rowGap', 'rowHeight', 'rowStride']) assert.equal(tickerAfter[key], tickerBefore[key], `ticker ${key} must stay unchanged`)
+		const tickerLine = await page.locator('#live > [data-tool-ticker]').evaluate(el => {
+			const line = getComputedStyle(el, '::before')
+			return { content: line.content, vertical: line.borderInlineStartWidth, horizontal: line.borderBlockEndWidth, height: parseFloat(line.height), tickerHeight: el.getBoundingClientRect().height }
+		})
+		assert.equal(tickerLine.content, '""')
+		assert.equal(tickerLine.vertical, '1px')
+		assert.equal(tickerLine.horizontal, '1px')
+		assert.equal(tickerLine.height, tickerLine.tickerHeight / 2, 'the live ticker must keep a stationary L at its header midpoint')
 		await page.evaluate(() => { document.documentElement.dir = 'rtl' })
 		const rtl = await geometry(page)
 		assert.ok(rtl.indentRight > 0, 'RTL rows must indent from the right')

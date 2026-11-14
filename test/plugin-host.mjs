@@ -17,7 +17,10 @@ const bundle = await build({
 					jsx('p', { children: description })
 				] })
 			}
-			window.pluginReact = { useEffect, useRef, useState, createRoot, jsx, jsxs, ToggleRow }
+			function ListRow({ title, description, action }) {
+				return jsxs('div', { children: [jsx('span', { children: title }), jsx('p', { children: description }), action] })
+			}
+			window.pluginReact = { useEffect, useRef, useState, createRoot, jsx, jsxs, ToggleRow, ListRow }
 		`
 	},
 	bundle: true,
@@ -37,8 +40,8 @@ export async function activatePlugin(page, source, { disposeImmediately = false,
 			return url
 		}
 		const modules = {
-			// `host` is a fixture only when a test defines window.pluginHost; otherwise it is undefined, as on older hosts.
-			'@hermes/plugin-sdk': moduleUrl("export const ToggleRow = window.pluginReact.ToggleRow; export const host = window.pluginHost; export const COMPOSER_AREAS = { actions: 'composer.actions' }; export const GHOST_ICON_BTN = 'ghost-icon-btn'"),
+			// `host` is a fixture only when a test defines window.pluginHost; otherwise it has no state atoms, as on older hosts.
+			'@hermes/plugin-sdk': moduleUrl("export const ToggleRow = window.pluginReact.ToggleRow; export const ListRow = window.pluginReact.ListRow; export const host = window.pluginHost || { state: {} }; export const COMPOSER_AREAS = { actions: 'composer.actions' }; export const GHOST_ICON_BTN = 'ghost-icon-btn'"),
 			'react': moduleUrl('export const { useEffect, useRef, useState } = window.pluginReact'),
 			'react/jsx-runtime': moduleUrl('export const jsx = window.pluginReact.jsx; export const jsxs = window.pluginReact.jsxs')
 		}
