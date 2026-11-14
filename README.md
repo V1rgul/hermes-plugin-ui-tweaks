@@ -16,7 +16,7 @@ The native **Hide code diffs** setting remains authoritative: switch it off if y
 
 ## Settings
 
-Open **Settings → Plugins → Wide HTML Previews**. The page uses Hermes's native settings rows and has two independent switches:
+Open **Settings → Plugins → Hermes UI Tweaks**. The page uses Hermes's native settings rows and has two independent switches:
 
 - **Expand tool-call lists by default** — enabled by default; opens lists without expanding every tool payload.
 - **Fold patches and file edits by default** — enabled by default; folds diffs but leaves them reopenable.
@@ -27,11 +27,11 @@ Preferences are saved through the public `ctx.storage` API for this plugin on th
 
 ## Installation or update
 
-Download [plugin.js](https://raw.githubusercontent.com/V1rgul/hermes-plugin-ui-tweaks/main/plugin.js) from this repository. The installed plugin keeps the existing **Wide HTML Previews** name and `hermes-wide-previews` ID so updates retain saved preferences.
+Download [plugin.js](https://raw.githubusercontent.com/V1rgul/hermes-plugin-ui-tweaks/main/plugin.js) from this repository. The plugin keeps its existing `hermes-wide-previews` ID so updates retain saved preferences.
 
-1. On the computer running Hermes Desktop, open **Capabilities → Plugins** and use the folder/reveal control for **Wide HTML Previews** to find its local `plugin.js`.
+1. On the computer running Hermes Desktop, open **Capabilities → Plugins** and use the folder/reveal control for **Hermes UI Tweaks** (previously **Wide HTML Previews**) to find its local `plugin.js`.
 2. Replace that file with the updated `plugin.js`, keeping the folder name `hermes-wide-previews` and the file directly inside it: `desktop-plugins/hermes-wide-previews/plugin.js`.
-3. Desktop watches the folder and should hot-reload it. If needed, use **Reload desktop plugins** in the command palette. Keep **Wide HTML Previews** enabled.
+3. Desktop watches the folder and should hot-reload it. If needed, use **Reload desktop plugins** in the command palette. Keep **Hermes UI Tweaks** enabled.
 4. Open a conversation containing several tool calls and a file-edit diff. New/unselected tool-call lists should be open, diffs folded, and the toggles usable.
 
 For a first installation, use the same folder/reveal control to locate the Desktop plugin root, create the `hermes-wide-previews` folder there, and put `plugin.js` directly inside it.

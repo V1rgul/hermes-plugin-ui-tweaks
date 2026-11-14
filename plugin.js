@@ -4,6 +4,7 @@ import { jsx, jsxs } from 'react/jsx-runtime'
 
 /** Customize chat presentation without touching preview documents or message history. */
 const ID = 'hermes-wide-previews'
+const NAME = 'Hermes UI Tweaks'
 const defaultPreferences = { expandToolCalls: true, foldFileEdits: true }
 
 function readPreferences(storage) {
@@ -223,9 +224,9 @@ export function installToolDefaults(doc = document, getPreferences = () => defau
 
 export default {
 	id: ID,
-	name: 'Wide HTML Previews',
+	name: NAME,
 	description: 'Full-width HTML previews, expanded tool lists, and folded file edits.',
-	version: '0.4.0',
+	version: '0.4.1',
 	register(ctx) {
 		let preferences = readPreferences(ctx.storage)
 		const getPreferences = () => preferences
@@ -240,8 +241,8 @@ export default {
 		}
 		const page = {
 			id: 'settings',
-			title: 'Wide HTML Previews',
-			icon: 'settings-gear',
+			title: NAME,
+			icon: 'symbol-color',
 			render: () => jsx(SettingsPage, { getPreferences, updatePreference })
 		}
 		if (ctx.registerSettingsPage) ctx.registerSettingsPage(page)
