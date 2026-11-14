@@ -18,8 +18,8 @@ async function smoke(page, context, shot) {
 		await style.waitFor({ state: 'attached', timeout: 60000 })
 		await page.getByRole('button', { name: /^backend v/ }).waitFor({ timeout: 60000 })
 		const later = page.getByRole('button', { name: "I'll choose a provider later", exact: true })
-		// The credential check can finish after the gateway connects. A fresh profile must wait for its picker.
-		const skipped = await page.evaluate(() => localStorage.getItem('hermes-onboarding-skipped-v1') === '1')
+		// The credential check can finish after the gateway connects. A fresh profile must wait for its picker; a profile with a configured provider never shows it.
+		const skipped = await page.evaluate(() => localStorage.getItem('hermes-onboarding-skipped-v1') === '1' || localStorage.getItem('hermes-desktop-onboarded-v1') !== null)
 		if (!skipped) await later.waitFor({ state: 'visible', timeout: 60000 })
 		if (await later.isVisible()) await later.click()
 		const decline = page.getByRole('button', { name: 'No thanks', exact: true })

@@ -1,6 +1,6 @@
 # Hermes UI Tweaks
 
-A small Hermes Desktop UI plugin for full-width inline HTML previews, expanded tool-call lists, and folded file-edit diffs.
+A small Hermes Desktop UI plugin for full-width inline HTML previews, expanded tool-call lists, folded file-edit diffs, and resync of duplicated chat messages.
 
 ## Chat behavior
 
@@ -12,16 +12,26 @@ A small Hermes Desktop UI plugin for full-width inline HTML previews, expanded t
 - Manual mouse and keyboard toggles take precedence. Existing native disclosure choices are preserved when local storage is available, including when rows or sessions remount.
 - Late-arriving diffs and newly rendered messages receive the same defaults. Failed-edit explanations, unrelated controls, thinking blocks, and inert approval activity are left alone.
 
+## Duplicated messages
+
+Desktop sometimes paints part of a conversation twice although the server holds one copy ([#134415](https://github.com/NousResearch/hermes-agent/issues/134415)), for example after leaving a session mid-turn and coming back, or after an in-place context compaction during a turn.
+
+- When a turn ends, or after switching to a session, the plugin looks for a repeated run of assistant prose in the main chat. Tool rows, thinking blocks and short repeated wording are ignored.
+- If it finds one, it asks Desktop to rebuild that session from the server, as Desktop itself does after missing gateway events. No page reload, no request to the server; other tabs and the composer are untouched.
+- A broom button next to the model picker, in every composer including split tiles, does the same on demand. It turns orange when that chat shows duplicates, sweeps while cleaning, and is disabled while the session is working.
+- In a split tile, the button acts on the tile once it has focus (clicking in it is enough). Automatic resync covers the primary chat only.
+
 The native **Hide code diffs** setting remains authoritative: switch it off if you want folded diffs that you can reopen. The plugin does not change Hermes's global settings, messages, file contents, or tool execution. It makes no network requests and needs no agent-side component.
 
 ## Settings
 
-Open **Settings → Plugins → Hermes UI Tweaks**. The page uses Hermes's native settings rows and has two independent switches:
+Open **Settings → Plugins → Hermes UI Tweaks**. The page uses Hermes's native settings rows and has three independent switches:
 
 - **Expand tool-call lists by default** — enabled by default; opens lists without expanding every tool payload.
 - **Fold patches and file edits by default** — enabled by default; folds diffs but leaves them reopenable.
+- **Resync duplicated messages automatically** — enabled by default; when off, duplicates are only flagged by the orange broom.
 
-Changes take effect without reloading. Enabling a default also applies it to currently mounted controls that do not already have an explicit choice. Turning a default off stops applying it; it does not force the current chat into the opposite layout or clear manual choices. Full-width previews remain enabled regardless of these two switches.
+Changes take effect without reloading. Enabling a default also applies it to currently mounted controls that do not already have an explicit choice. Turning a default off stops applying it; it does not force the current chat into the opposite layout or clear manual choices. Full-width previews remain enabled regardless of these switches.
 
 Preferences are saved through the public `ctx.storage` API for this plugin on this Desktop installation/browser, not on the remote backend. They survive plugin and app reloads. If local storage is unavailable, the switches still work for the current plugin instance but cannot persist. Older hosts without the `registerSettingsPage` convenience helper use the documented `settings.plugins` contribution fallback.
 
@@ -48,6 +58,8 @@ The public SDK supplies registration and disposal but no default-expansion hook 
 - A mutation observer reacts to added tool controls and disclosure/visibility attributes. It uses the existing group/row buttons rather than hiding code with CSS or changing React state privately. Only groups expand; only open file-edit rows containing a `file-diff-panel` fold, according to the corresponding preference. Candidate scanning is incremental; changing a switch performs one refresh, not recurring full-transcript scans or polling.
 
 Before/after reads of `hermes.desktop.toolDisclosure.v1` distinguish an explicit saved native choice from a default. When a newly mounted control reveals an existing choice, the controller restores it through the native toggle after the render commits. With local storage unavailable, per-mounted-control manual toggles are still respected, but preservation across remounts cannot be guaranteed.
+
+The duplicate resync uses the public `host.state` atoms (`activeSessionId`, `busyBySession`), `host.notify` and a `COMPOSER_AREAS.actions` button; a split tile's session is read from `focusedSessionId` while that tile has focus. The broom is Lucide's `broom` icon (ISC). The rebuild itself relies on Desktop internals: the plugin wraps `WebSocket.prototype.send` to recognize the renderer's gateway socket (`/api/ws`) and dispatches a local `session.replay_gap` event on it, which Desktop answers with an authoritative snapshot of the session. If a Desktop update changes that event or its transport, the resync stops having an effect and the leftover notification suggests a reload; disabling the plugin restores `send`. On hosts without `host.state`, the feature is skipped and the other tweaks still load.
 
 The wrapper shape, tool markers, disclosure buttons, browser endpoint, and local-storage key are Hermes implementation details, not a stable chat-customization API. The plugin lives outside Hermes core and survives application updates, but a future renderer change may require updating its selectors. It intentionally preserves any separate width restriction on the chat column itself. Preview attachment cards are not converted into live previews.
 

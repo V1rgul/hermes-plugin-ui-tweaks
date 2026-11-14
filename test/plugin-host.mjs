@@ -7,7 +7,7 @@ const bundle = await build({
 	stdin: {
 		resolveDir: fileURLToPath(new URL('..', import.meta.url)),
 		contents: `
-			import { useState } from 'react'
+			import { useEffect, useRef, useState } from 'react'
 			import { createRoot } from 'react-dom/client'
 			import { jsx, jsxs } from 'react/jsx-runtime'
 			function ToggleRow({ label, description, checked, onChange }) {
@@ -17,7 +17,7 @@ const bundle = await build({
 					jsx('p', { children: description })
 				] })
 			}
-			window.pluginReact = { useState, createRoot, jsx, jsxs, ToggleRow }
+			window.pluginReact = { useEffect, useRef, useState, createRoot, jsx, jsxs, ToggleRow }
 		`
 	},
 	bundle: true,
@@ -37,13 +37,23 @@ export async function activatePlugin(page, source, { disposeImmediately = false,
 			return url
 		}
 		const modules = {
-			'@hermes/plugin-sdk': moduleUrl('export const ToggleRow = window.pluginReact.ToggleRow'),
-			'react': moduleUrl('export const useState = window.pluginReact.useState'),
+			// `host` is a fixture only when a test defines window.pluginHost; otherwise it is undefined, as on older hosts.
+			'@hermes/plugin-sdk': moduleUrl("export const ToggleRow = window.pluginReact.ToggleRow; export const host = window.pluginHost; export const COMPOSER_AREAS = { actions: 'composer.actions' }; export const GHOST_ICON_BTN = 'ghost-icon-btn'"),
+			'react': moduleUrl('export const { useEffect, useRef, useState } = window.pluginReact'),
 			'react/jsx-runtime': moduleUrl('export const jsx = window.pluginReact.jsx; export const jsxs = window.pluginReact.jsxs')
 		}
 		let root
 		const disposers = []
 		window.pluginPages ??= []
+		// Composer slots render contributions where Desktop would, inside each chat surface.
+		const slots = new Map()
+		window.mountContribution = (id, container) => {
+			const contribution = window.pluginContributions[id]
+			const root = window.pluginReact.createRoot(container)
+			slots.set(container, { id, root })
+			root.render(window.pluginReact.jsx(contribution.render, {}))
+		}
+		window.pluginContributions ??= {}
 		function registerSettingsPage(settingsPage) {
 			window.pluginPages.push(settingsPage)
 			disposers.push(() => {
@@ -65,6 +75,17 @@ export async function activatePlugin(page, source, { disposeImmediately = false,
 			},
 			onDispose(dispose) { disposers.push(dispose) },
 			register(contribution) {
+				// Re-registering an id replaces it, as in the real registry.
+				if (contribution.area.startsWith('composer.')) {
+					window.pluginContributions[contribution.id] = contribution
+					const remove = () => {
+						if (window.pluginContributions[contribution.id] !== contribution) return
+						delete window.pluginContributions[contribution.id]
+						for (const [container, mounted] of slots) if (mounted.id === contribution.id) { mounted.root.unmount(); slots.delete(container) }
+					}
+					disposers.push(remove)
+					return remove
+				}
 				if (contribution.area !== 'settings.plugins') throw new Error('Unexpected contribution area')
 				registerSettingsPage(contribution)
 			}
@@ -72,7 +93,8 @@ export async function activatePlugin(page, source, { disposeImmediately = false,
 		if (!legacySettingsApi) context.registerSettingsPage = registerSettingsPage
 		try {
 			const rewritten = source.replace(/(['"])(@hermes\/plugin-sdk|react\/jsx-runtime|react)\1/g, (_, quote, name) => JSON.stringify(modules[name]))
-			;(await import(moduleUrl(rewritten))).default.register(context)
+			window.pluginExports = await import(moduleUrl(rewritten))
+			window.pluginExports.default.register(context)
 			window.mountPluginSettings = () => {
 				const settingsPage = window.pluginPages[0]
 				if (!settingsPage) throw new Error('No settings page registered')
