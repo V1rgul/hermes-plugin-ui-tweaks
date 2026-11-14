@@ -37,7 +37,7 @@ export async function activatePlugin(page, source, { disposeImmediately = false,
 			return url
 		}
 		const modules = {
-			'@hermes/plugin-sdk': moduleUrl('export const ToggleRow = window.pluginReact.ToggleRow'),
+			'@hermes/plugin-sdk': moduleUrl('export const ToggleRow = window.pluginReact.ToggleRow; export const host = window.pluginHost || { state: {} }'),
 			'react': moduleUrl('export const useState = window.pluginReact.useState'),
 			'react/jsx-runtime': moduleUrl('export const jsx = window.pluginReact.jsx; export const jsxs = window.pluginReact.jsxs')
 		}
