@@ -53,6 +53,18 @@ Stop when testing is finished. This closes Chromium cleanly and stops only this 
 
 `browser-reset` is manual-only: it closes Chromium and deletes just the browser profile. To retire a task worktree, run `npm run webapp -- destroy` **before** removing that worktree; it removes that checkout's container and generated `.test-webapp` state. No global pruning or changes to T3sidebar's containers are performed.
 
+## Reproducing duplicated messages
+
+`tools/test-webapp/mock-llm.py` is a scripted OpenAI-compatible model, so live turns run without provider credentials: the gateway, tools and renderer are real, the replies are invented. Every prose block carries a unique `[xxxxxxxx]` tag, so a tag rendered twice is a duplicate. Run it in the container (`podman cp` it to `/opt/data`, then `python /opt/data/mock-llm.py 18080` as `hermes`) and point the workspace profile at it with `hermes config set` (`model.provider custom`, `model.base_url http://127.0.0.1:18080/v1`, `model.default mock`, and a placeholder `model.api_key`). Prompt keywords such as `long`, `background`, `parallel` or `many` select its scenarios.
+
+The `repro-*.js` files are `drive` bodies (`npm run webapp -- drive "$(cat tools/test-webapp/repro-dupes.js)"`) whose header comments list their environment variables:
+
+- `repro-dupes.js` runs turns across scenarios and records every duplicate seen. With `compression.in_place true` and a low `compression.threshold_tokens` (30000), the long scenario compacts mid-turn and leaves duplicates.
+- `repro-away.js` leaves a session mid-turn and returns, in a session longer than the 120-row tail page.
+- `repro-remedies.js` reproduces the compaction case and tries plugin-reachable remedies in order.
+
+They are diagnostics for [#134415](https://github.com/NousResearch/hermes-agent/issues/134415), useful to recheck the resync after a Desktop update; they are not part of `npm test`.
+
 ## Fixture checks
 
 `npm test` remains the fast, broader fixture suite. It complements the real-renderer smoke check; neither suite claims to exercise native Electron integration or live model execution.
