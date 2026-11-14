@@ -1,3 +1,5 @@
 node_modules/
 .worktrees/
 /hermes-wide-previews.zip
+.test-webapp/
+__pycache__/
