@@ -52,20 +52,56 @@ ${scope} span:has(> ${frame}) {
 }
 `
 
-// Indent the list/ticker, not its summary or the contents of an individual result.
-// Compact only tool-to-tool spacing; keep the prose boundaries and ticker line height intact.
+const toolList = `${scope} [data-tool-group] > [data-tool-summary] ~ div:not([data-tool-ticker]):has(> [data-tool-row])`
+const toolTicker = `${scope} [data-tool-group] > [data-tool-summary] ~ [data-tool-ticker]`
+
+// Keep connectors inside each row's clipping boundary; a gapless list joins their vertical strokes.
+// The last branch stops at its header, even when its result is open. Ticker stride stays native.
 export const toolLayoutStyles = `
 ${scope} [data-tool-group] {
-	--tool-row-gap: 0.125rem;
-	row-gap: 0.125rem !important;
+	--tool-row-gap: 0;
+	row-gap: 0 !important;
 }
-${scope} [data-tool-group] > [data-tool-summary] ~ div:has([data-tool-row]) {
+${toolList} {
+	row-gap: 0 !important;
+}
+${toolList} > [data-tool-row],
+${toolTicker} {
+	position: relative;
 	padding-inline-start: 1rem;
 	box-sizing: border-box;
 	min-width: 0;
 }
-${scope} [data-tool-group] > [data-tool-summary] ~ div:not([data-tool-ticker]):has([data-tool-row]) {
-	row-gap: 0.125rem !important;
+${toolList} > [data-tool-row]::before,
+${toolList} > [data-tool-row]::after,
+${toolTicker}::before {
+	content: '';
+	position: absolute;
+	inset-inline-start: 0.375rem;
+	pointer-events: none;
+	border-color: var(--ui-text-quaternary, var(--ui-text-tertiary, currentColor));
+	border-style: solid;
+	border-width: 0;
+}
+${toolList} > [data-tool-row]::before {
+	inset-block: 0;
+	border-inline-start-width: 1px;
+}
+${toolList} > [data-tool-row]:last-child::before {
+	block-size: calc(var(--conversation-line-height, 1.5em) / 2);
+	inset-block-end: auto;
+}
+${toolList} > [data-tool-row]::after {
+	inset-block-start: calc(var(--conversation-line-height, 1.5em) / 2);
+	inline-size: 0.5rem;
+	border-block-start-width: 1px;
+}
+${toolTicker}::before {
+	inset-block-start: 0;
+	block-size: calc(var(--conversation-line-height, 1.5em) / 2);
+	inline-size: 0.5rem;
+	border-inline-start-width: 1px;
+	border-block-end-width: 1px;
 }
 ${scope} > :is([data-tool-row], [data-tool-group]) + :is([data-tool-row], [data-tool-group]) {
 	margin-block-start: 0.125rem !important;

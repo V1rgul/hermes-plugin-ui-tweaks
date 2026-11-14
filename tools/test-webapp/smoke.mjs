@@ -55,11 +55,30 @@ async function smoke(page, context, shot) {
 		check(await page.locator('[data-tool-row]').count() >= 3, 'Real tool group must render its read/search rows and the separate edit')
 		const indentation = await page.locator('[data-tool-group]').first().evaluate(el => {
 			const summary = el.querySelector('[data-tool-summary]').getBoundingClientRect()
-			const row = el.querySelector('[data-tool-row]').getBoundingClientRect()
+			const row = el.querySelector('[data-tool-row] > div:first-child').getBoundingClientRect()
 			return row.x - summary.x
 		})
 		check(Math.abs(indentation - 16) < 1, `Tool indentation must be 16px, got ${indentation}`)
 		report.checks.push('native tool group expanded, edit folded, rows indented 16px')
+		const connectors = await page.locator('[data-tool-group]').first().evaluate(el => {
+			const summary = el.querySelector('[data-tool-summary]').getBoundingClientRect()
+			return { summaryBottom: summary.bottom, rows: Array.from(el.querySelectorAll(':scope > div > [data-tool-row]'), row => {
+				const rect = row.getBoundingClientRect()
+				const before = getComputedStyle(row, '::before')
+				const after = getComputedStyle(row, '::after')
+				return { content: before.content, top: rect.top + parseFloat(before.top), bottom: rect.top + parseFloat(before.top) + parseFloat(before.height), branch: rect.top + parseFloat(after.top), stroke: before.borderInlineStartWidth, branchStroke: after.borderBlockStartWidth, pointerEvents: before.pointerEvents }
+			}) }
+		})
+		check(connectors.rows.length >= 2, 'Native group must expose multiple branches')
+		check(Math.abs(connectors.rows[0].top - connectors.summaryBottom) < 1, 'Tree rail must join the native summary without a gap')
+		for (const [index, line] of connectors.rows.entries()) {
+			check(line.content === '""' && line.stroke === '1px' && line.branchStroke === '1px', 'Each native row must paint both connector strokes')
+			check(line.pointerEvents === 'none', 'Connectors must not intercept native controls')
+			if (index) check(Math.abs(connectors.rows[index - 1].bottom - line.top) < 1, 'Native tree rail must stay continuous between calls')
+		}
+		check(Math.abs(connectors.rows.at(-1).bottom - connectors.rows.at(-1).branch) < 1, 'Last native branch must end in an L')
+		report.checks.push('continuous tree rail from summary to calls, final L, noninteractive decoration')
+		report.treeScreenshot = await shot('integration-tool-tree')
 		await editToggle().click()
 		await page.locator('[data-tool-row] [data-slot="file-diff-panel"]').waitFor()
 		check((await page.locator('[data-tool-row] [data-slot="file-diff-panel"]').innerText()).includes('After the invented edit.'), 'Native diff contents must reopen')
