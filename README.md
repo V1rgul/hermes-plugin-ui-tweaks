@@ -36,7 +36,7 @@ Download [plugin.js](https://raw.githubusercontent.com/V1rgul/hermes-plugin-ui-t
 
 For a first installation, use the same folder/reveal control to locate the Desktop plugin root, create the `hermes-wide-previews` folder there, and put `plugin.js` directly inside it.
 
-Updating files on a remote Hermes server does **not** update the separate Windows Desktop copy. No build, npm installation, backend install, or backend restart is needed to use this plugin.
+Updating files on a remote Hermes server does **not** update the separate native Desktop copy. No build, npm installation, backend install, or backend restart is needed to use this plugin.
 
 Disabling the plugin removes its preview sizing rule, observer, and click listener. An already queued restoration of a saved manual choice may finish on the next animation frame; no new defaults are applied after disable. Current disclosure choices remain in Hermes's native UI storage, just as after manual toggles; disabling does not reset the chat layout. To uninstall, disable it and remove only its `hermes-wide-previews` folder.
 
@@ -53,11 +53,21 @@ The wrapper shape, tool markers, disclosure buttons, browser endpoint, and local
 
 ## Tests
 
+For integration checks against the **real Hermes Desktop workspace**, use the isolated container and persistent Chromium setup adapted from T3sidebar:
+
+```sh
+npm ci && npx playwright install chromium && npm run webapp -- setup && npm run webapp -- seed && npm run webapp -- browser && npm run test:integration
+```
+
+See [Development](docs/development.md) for iteration, screenshots, per-worktree isolation and cleanup. It uses the actual Webapp renderer/gateway with explicitly invented conversations, without mounting your Hermes home or copying credentials. It is not the native Electron shell. Stop it with `npm run webapp -- stop` when finished.
+
+The broader fixture suite remains available:
+
 ```sh
 npm ci && npx playwright install chromium && npm test
 ```
 
-Tests run the actual plugin in headless Chromium against geometry fixtures matching older/current/browser-hosted previews and stateful tool-control fixtures matching the inspected `ToolRun`, `ToolEntry`, and `DisclosureRow` contracts. The latter persist disclosure state synchronously, commit DOM updates later, and unmount hidden rows. The settings page is rendered with real React and a fixture matching the public SDK's `ToggleRow`, registry, and namespaced-storage contracts. These are fixtures, not a full Electron Desktop build; the user's installed Windows client remains the final integration check. The React/esbuild packages are development-only; Desktop supplies the plugin's runtime imports itself.
+Tests run the actual plugin in headless Chromium against geometry fixtures matching older/current/browser-hosted previews and stateful tool-control fixtures matching the inspected `ToolRun`, `ToolEntry`, and `DisclosureRow` contracts. The latter persist disclosure state synchronously, commit DOM updates later, and unmount hidden rows. The settings page is rendered with real React and a fixture matching the public SDK's `ToggleRow`, registry, and namespaced-storage contracts. These are fixtures, not a full Electron Desktop build; native Electron behavior requires a separate integration check. The React/esbuild packages are development-only; Desktop supplies the plugin's runtime imports itself.
 
 Coverage includes preview resizing and interaction-state retention, dynamic messages, list-only expansion, folded patch/edit/write diffs, manual and keyboard overrides, pending-to-completed edits, native state preservation on remount, errors and unrelated controls, storage denial, approval visibility, disposal, and repeated reloads. Settings tests exercise both switches independently, live enable/disable behavior, plugin/browser reload persistence, malformed preferences, manual-choice preservation, registration fallback, and in-memory operation when storage is denied. Tool-layout geometry tests check indentation, compact list and adjacent-tool gaps, unchanged prose/result spacing, singleton/outside-scope isolation, dynamic insertion, narrow layouts, RTL, ticker stride, retained input state, and exact restoration on disable.
 
