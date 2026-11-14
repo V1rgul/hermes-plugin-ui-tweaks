@@ -335,7 +335,10 @@ test('settings persist through plugin and browser reloads with both defaults dis
 		await showSettings(page)
 		await page.getByRole('switch', { name: expandLabel }).click()
 		await page.getByRole('switch', { name: foldLabel }).click()
-		assert.deepEqual(await page.evaluate(key => JSON.parse(localStorage.getItem(key)), preferenceStorageKey), { expandToolCalls: false, foldFileEdits: false })
+		assert.deepEqual(await page.evaluate(key => {
+			const { expandToolCalls, foldFileEdits } = JSON.parse(localStorage.getItem(key))
+			return { expandToolCalls, foldFileEdits }
+		}, preferenceStorageKey), { expandToolCalls: false, foldFileEdits: false })
 		await page.evaluate(() => window.disposePlugin())
 		assert.equal(await page.evaluate(() => window.pluginPages.length), 0)
 		await activate(page)
