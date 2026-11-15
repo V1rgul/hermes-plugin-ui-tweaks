@@ -123,6 +123,22 @@ async function smoke(page, context, shot) {
 		report.checks.push('manual group/diff choices survive a real app reload')
 		report.toolsScreenshot = await shot('integration-tools')
 
+		await route('/ui-tweaks-example-long-output')
+		await page.getByText('Invented history for the tool detail height check', { exact: false }).waitFor()
+		for (const name of ['seq 80', 'long.txt']) {
+			const toggle = page.locator('[data-tool-row]').filter({ hasText: name }).locator('button[aria-expanded]').first()
+			if (await toggle.getAttribute('aria-expanded') === 'false') await toggle.click()
+			await expanded(toggle, true)
+		}
+		await page.locator('[data-tool-row] [data-slot="file-diff-panel"]').waitFor()
+		report.details = await page.evaluate(() => Array.from(document.querySelectorAll('[data-tool-row] :is(pre.max-h-20, [data-slot="file-diff-panel"])'), el => ({ slot: el.dataset.slot || 'output', height: el.getBoundingClientRect().height, scrolls: el.scrollHeight > el.clientHeight, cap: Math.min(el.dataset.slot ? 576 : 240, innerHeight * 0.7) })))
+		check(report.details.length === 2, `Opened long output and diff must render one box each: ${JSON.stringify(report.details)}`)
+		for (const box of report.details) check(Math.abs(box.height - box.cap) < 1 && box.scrolls, `Long ${box.slot} must fill its tripled cap and still scroll: ${JSON.stringify(box)}`)
+		report.checks.push('opened native terminal output and diff use three times their height caps, then scroll')
+		report.detailsScreenshot = await shot('integration-tool-details')
+		await route('/ui-tweaks-example-tools')
+		await page.getByText('Invented history for testing only.', { exact: false }).waitFor()
+
 		await expanded(statusToggle(), false)
 		await page.locator('.coding-status-bar').waitFor({ state: 'attached' })
 		check(await page.locator('.coding-status-bar').isVisible() === false, 'Folded native drawer must hide the branch row')
@@ -172,7 +188,9 @@ async function smoke(page, context, shot) {
 		const previewRow = page.getByText('HTML previews: full width', { exact: true }).locator('xpath=ancestor::div[contains(@class, "@container")][1]')
 		check(await previewRow.getByText('Always on', { exact: true }).count() === 1, 'Full-width previews must be visible as an always-on feature')
 		check(await previewRow.locator('button, input, [role="switch"]').count() === 0, 'The always-on feature must not have a toggle, including a disabled one')
-		report.checks.push('categorized settings and a native full-width preview row without a switch')
+		const detailRow = page.getByText('Details: taller output', { exact: true }).locator('xpath=ancestor::div[contains(@class, "@container")][1]')
+		check(await detailRow.getByText('Always on', { exact: true }).count() === 1 && await detailRow.locator('button, input, [role="switch"]').count() === 0, 'Taller details must be listed as always on without a switch')
+		report.checks.push('categorized settings with always-on full-width preview and taller-details rows without switches')
 		check(await expandSwitch.getAttribute('aria-checked') === 'true', 'Native settings must show expand enabled')
 		await expandSwitch.click()
 		check(await expandSwitch.getAttribute('aria-checked') === 'false', 'Native switch must turn off')

@@ -29,7 +29,7 @@ if not (WORKSPACE / ".git").exists():
 <script>window.count = 0</script></div></body></html>''')
 
 db = SessionDB(HOME / "state.db")
-for suffix in ("tools", "preview", "long-prompts"):
+for suffix in ("tools", "preview", "long-prompts", "long-output"):
 	sid = f"ui-tweaks-example-{suffix}"
 	if db.get_session(sid) is not None:
 		continue
@@ -40,6 +40,20 @@ for suffix in ("tools", "preview", "long-prompts"):
 		text = "Invented long history prompt — renderer test only\n" + "\n".join(f"Line {index}: this deliberately long example checks the native prompt clamp." for index in range(1, 13))
 		db.append_message(sid, "user", content=text)
 		db.append_message(sid, "assistant", content="Invented history for the long-prompt display check; no model was called.")
+		continue
+	if suffix == "long-output":
+		# Long enough to overflow both the native and the tripled caps of an opened call.
+		output = "\n".join(f"Invented output line {index}" for index in range(1, 81))
+		diff = "--- a/long.txt\n+++ b/long.txt\n@@ -1,40 +1,40 @@\n" + "\n".join(f"-Invented old line {index}\n+Invented new line {index}" for index in range(1, 41))
+		calls = [
+			("long-terminal", "terminal", {"command": "seq 80"}, {"output": output, "exit_code": 0, "error": None}),
+			("long-patch", "patch", {"mode": "replace", "path": str(WORKSPACE / "long.txt"), "old_string": "old", "new_string": "new"}, {"success": True, "path": str(WORKSPACE / "long.txt"), "diff": diff}),
+		]
+		db.append_message(sid, "user", content="Show long invented tool output.")
+		db.append_message(sid, "assistant", content="", tool_calls=[{"id": ident, "type": "function", "function": {"name": name, "arguments": json.dumps(args)}} for ident, name, args, result in calls])
+		for ident, name, args, result in calls:
+			db.append_message(sid, "tool", content=json.dumps(result), tool_name=name, tool_call_id=ident)
+		db.append_message(sid, "assistant", content="Invented history for the tool detail height check; no command ran.")
 		continue
 	if suffix == "preview":
 		db.append_message(sid, "user", content="Show the invented interactive preview.")
@@ -56,4 +70,4 @@ for suffix in ("tools", "preview", "long-prompts"):
 		db.append_message(sid, "tool", content=json.dumps(result), tool_name=name, tool_call_id=ident)
 	db.append_message(sid, "assistant", content="Invented history for testing only. Expand this group and reopen the example.txt diff using the native controls.")
 db.close()
-print(json.dumps({"sessions": [f"ui-tweaks-example-{suffix}" for suffix in ("tools", "preview", "long-prompts")], "workspace": str(WORKSPACE), "invented": True}))
+print(json.dumps({"sessions": [f"ui-tweaks-example-{suffix}" for suffix in ("tools", "preview", "long-prompts", "long-output")], "workspace": str(WORKSPACE), "invented": True}))

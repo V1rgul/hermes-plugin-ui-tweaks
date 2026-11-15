@@ -43,6 +43,11 @@ function SettingsPage({ getPreferences, updatePreference }) {
 						description: 'Keep patches and file-edit diffs closed until you open them. Leave Hermes “Hide code diffs” off to keep them reopenable.',
 						checked: preferences.foldFileEdits,
 						onChange: change('foldFileEdits')
+					}),
+					jsx(ListRow, {
+						title: 'Details: taller output',
+						description: 'Opened calls and diffs show up to three times more lines before scrolling, within the window height. Short results keep their size.',
+						action: jsx('span', { className: 'text-sm text-(--ui-text-secondary)', children: 'Always on' })
 					})
 				]
 			}),
@@ -173,10 +178,24 @@ ${scope} > :is([data-tool-row], [data-tool-group]):has(+ :is([data-tool-row], [d
 }
 `
 
+// Native expanded calls cap output/payloads at 5rem (about four lines), error bodies at 14rem and diffs at 12rem, so reading a result means scrolling a tiny box. Triple each cap; max-height leaves short results at their natural height. The viewport bound keeps a long result one scroller that fits on screen. The review pane's diffs sit outside tool rows and keep their own sizing.
+const toolDetail = `${scope} [data-tool-row]`
+export const toolDetailStyles = `
+${toolDetail} .max-h-20 {
+	max-height: min(15rem, 70vh) !important;
+}
+${toolDetail} .max-h-56 {
+	max-height: min(42rem, 70vh) !important;
+}
+${toolDetail} :is([data-slot="file-diff-panel"], [data-slot="diff-lines"]) {
+	max-height: min(36rem, 70vh) !important;
+}
+`
+
 export function installWidePreviews(doc = document) {
 	const style = doc.createElement('style')
 	style.dataset.hermesPlugin = ID
-	style.textContent = previewStyles + toolLayoutStyles + resyncStyles
+	style.textContent = previewStyles + toolLayoutStyles + toolDetailStyles + resyncStyles
 	doc.head.append(style)
 	return () => style.remove()
 }
@@ -842,7 +861,7 @@ export default {
 	id: ID,
 	name: NAME,
 	description: 'Full-width previews, tool/edit defaults, independent queue, prompt-text, and status-stack preferences, and resync of duplicated chat messages.',
-	version: '0.6.0',
+	version: '0.7.0',
 	register(ctx) {
 		let preferences = readPreferences(ctx.storage)
 		const getPreferences = () => preferences
