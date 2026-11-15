@@ -6,7 +6,7 @@ import { jsx, jsxs } from 'react/jsx-runtime'
 /** Customize chat presentation without changing preview documents or stored messages. */
 const ID = 'hermes-wide-previews'
 const NAME = 'Hermes UI Tweaks'
-const defaultPreferences = { expandToolCalls: true, foldFileEdits: true, foldStatusStack: true, expandQueuedPrompts: true, expandQueuedPromptText: true, expandHistoryPrompts: true, autoResync: true }
+const defaultPreferences = { expandToolCalls: true, foldFileEdits: true, foldStatusStack: true, expandQueuedPrompts: true, expandQueuedPromptText: true, expandHistoryPrompts: true, autoResync: true, treeToggle: true }
 
 function readPreferences(storage) {
 	const saved = storage.get('preferences', {})
@@ -39,10 +39,21 @@ function SettingsPage({ getPreferences, updatePreference }) {
 						onChange: change('expandToolCalls')
 					}),
 					jsx(ToggleRow, {
+						label: 'Lists: tree toggle instead of summary line',
+						description: 'Open lists drop their summary line; a minus box at the top of the tree folds them. Folded lists keep their summary, with a plus box.',
+						checked: preferences.treeToggle,
+						onChange: change('treeToggle')
+					}),
+					jsx(ToggleRow, {
 						label: 'File edits: fold diffs by default',
 						description: 'Keep patches and file-edit diffs closed until you open them. Leave Hermes “Hide code diffs” off to keep them reopenable.',
 						checked: preferences.foldFileEdits,
 						onChange: change('foldFileEdits')
+					}),
+					jsx(ListRow, {
+						title: 'Rows: compact',
+						description: 'Tool calls run one text size smaller, without gaps between them. Opened results keep their size.',
+						action: jsx('span', { className: 'text-sm text-(--ui-text-secondary)', children: 'Always on' })
 					}),
 					jsx(ListRow, {
 						title: 'Details: taller output',
@@ -90,6 +101,11 @@ function SettingsPage({ getPreferences, updatePreference }) {
 						onChange: change('autoResync')
 					}),
 					jsx(ListRow, {
+						title: 'Timestamps: at the end of the line',
+						description: 'With Hermes timestamps on, text and message times sit at the right of a line they share instead of taking their own.',
+						action: jsx('span', { className: 'text-sm text-(--ui-text-secondary)', children: 'Always on' })
+					}),
+					jsx(ListRow, {
 						title: 'HTML previews: full width',
 						description: 'Use the full available message width without changing preview content or state.',
 						action: jsx('span', { className: 'text-sm text-(--ui-text-secondary)', children: 'Always on' })
@@ -122,9 +138,25 @@ ${scope} span:has(> ${frame}) {
 const toolList = `${scope} [data-tool-group] > [data-tool-summary] ~ div:not([data-tool-ticker]):has(> [data-tool-row])`
 const toolTicker = `${scope} [data-tool-group] > [data-tool-summary] ~ [data-tool-ticker]`
 
+const toolBlock = `${scope} > :is([data-tool-row], [data-tool-group])`
+
 // Keep connectors inside each row's clipping boundary; a gapless list joins their vertical strokes.
-// The last branch stops at its header, even when its result is open. Ticker stride stays native.
+// The last branch stops at its header, even when its result is open.
+// Tool lines run one native step smaller (11→10px text, 18→16px lines at 100% chat text scale) and touch each other, so a run of calls and the cards around it read as one tree. Overriding the native tokens rather than sizes keeps the ticker window, reel stride and connector midpoints on one value; the message captures the native values so opened results get them back.
 export const toolLayoutStyles = `
+${scope} {
+	--hermes-ui-tweaks-tool-font-size: var(--conversation-tool-font-size);
+	--hermes-ui-tweaks-line-height: var(--conversation-line-height);
+}
+${toolBlock} {
+	--conversation-tool-font-size: calc(var(--hermes-ui-tweaks-tool-font-size) * 10 / 11);
+	--conversation-line-height: calc(var(--hermes-ui-tweaks-line-height) * 8 / 9);
+}
+${scope} [data-tool-row] > :not(:first-child) {
+	--conversation-tool-font-size: var(--hermes-ui-tweaks-tool-font-size);
+	--conversation-line-height: var(--hermes-ui-tweaks-line-height);
+	font-size: var(--hermes-ui-tweaks-tool-font-size);
+}
 ${scope} [data-tool-group] {
 	--tool-row-gap: 0;
 	row-gap: 0 !important;
@@ -171,12 +203,142 @@ ${toolTicker}::before {
 	border-block-end-width: 1px;
 }
 ${scope} > :is([data-tool-row], [data-tool-group]) + :is([data-tool-row], [data-tool-group]) {
-	margin-block-start: 0.125rem !important;
+	margin-block-start: 0 !important;
 }
 ${scope} > :is([data-tool-row], [data-tool-group]):has(+ :is([data-tool-row], [data-tool-group])) {
 	margin-block-end: 0 !important;
 }
 `
+
+// With Hermes `display.timestamps`, a prose block's time takes its own line above the text, the message's time a line below it, and a fold summary's time hugs its label. Tool rows already show theirs at the end of their line: put the others in that column instead of spending lines on them.
+// The prose time floats into the text's first line; `overflow: clip` keeps the text's clipping without the formatting context `hidden` starts, so only that line makes room. The time no longer separates the text from the block before it, so the text takes the native block gap back as a collapsing margin. A float sits below the previous block's own margin rather than the collapsed one, so it carries the gap itself, except after an opened diff whose margin already is that gap.
+const stamp = '[data-slot="timeline-timestamp"]'
+const scaffoldBlock = ':is([data-slot="tool-block"], [data-slot="aui_thinking-disclosure"], [data-slot="aui_turn-activity"])'
+export const timestampStyles = `
+${scope} > ${stamp}:has(+ .aui-md) {
+	float: inline-end;
+	margin: 0;
+	margin-inline-start: 0.75rem;
+	line-height: calc(var(--conversation-text-font-size) * var(--dt-line-height, 1.5));
+}
+${scope} > ${stamp} + .aui-md {
+	overflow: clip;
+	margin-block-start: 0 !important;
+}
+${scope} > ${scaffoldBlock} + ${stamp}:has(+ .aui-md) {
+	margin-block-start: var(--turn-block-gap);
+}
+${scope} > ${scaffoldBlock} + ${stamp} + .aui-md {
+	margin-block-start: var(--turn-block-gap) !important;
+}
+${scope} > .aui-md + ${stamp}:has(+ .aui-md) {
+	margin-block-start: var(--paragraph-gap);
+}
+${scope} > .aui-md + ${stamp} + .aui-md {
+	margin-block-start: var(--paragraph-gap) !important;
+}
+${scope} > [data-file-edit] + ${stamp}:has(+ .aui-md) {
+	margin-block-start: 0;
+}
+[data-slot="aui_assistant-message-root"] > ${stamp}:has(+ .min-h-6) {
+	position: relative;
+	z-index: 1;
+	block-size: 0;
+	padding-block-start: 0;
+	overflow: visible;
+	translate: 0 0.25rem;
+}
+${scope} [data-conversation-scaffold] button + span:has(> ${stamp}, > span > ${stamp}) {
+	margin-inline-start: auto;
+}
+`
+
+// An open list's calls already say what the summary line summarizes. Draw its native toggle as a small box at the top of the rail instead (minus when open, plus when folded), so the button, its accessible name and the native state stay Hermes's own.
+const runSummary = `${scope} [data-tool-group] > [data-tool-summary]`
+const openRun = `${scope} [data-tool-group]:has(> [data-tool-summary] button[aria-expanded="true"])`
+const foldedRun = `${scope} [data-tool-group]:has(> [data-tool-summary] button[aria-expanded="false"])`
+const toggleBox = 'var(--hermes-ui-tweaks-toggle)'
+export const treeToggleStyles = `
+${scope} [data-tool-group] {
+	--hermes-ui-tweaks-toggle: 0.5625rem;
+}
+${runSummary} button[aria-expanded] {
+	position: relative;
+}
+${runSummary} button[aria-expanded]::before {
+	content: '';
+	position: absolute;
+	inset-inline-start: calc(0.375rem + 0.5px - ${toggleBox} / 2);
+	inset-block-start: calc(var(--conversation-line-height) / 2 - ${toggleBox} / 2);
+	inline-size: ${toggleBox};
+	block-size: ${toggleBox};
+	box-sizing: border-box;
+	border: 1px solid currentColor;
+	border-radius: 2px;
+	background: linear-gradient(currentColor, currentColor) center / 5px 1px no-repeat;
+}
+${foldedRun} > [data-tool-summary] button[aria-expanded] {
+	padding-inline-start: 1rem;
+}
+${foldedRun} > [data-tool-summary] button[aria-expanded]::before {
+	background:
+		linear-gradient(currentColor, currentColor) center / 5px 1px no-repeat,
+		linear-gradient(currentColor, currentColor) center / 1px 5px no-repeat;
+}
+${foldedRun}:has(> [data-tool-ticker]) > [data-tool-summary] button[aria-expanded]::after {
+	content: '';
+	position: absolute;
+	inset-inline-start: 0.375rem;
+	inset-block: calc(var(--conversation-line-height) / 2 + ${toggleBox} / 2) 0;
+	border-inline-start: 1px solid var(--ui-text-quaternary, var(--ui-text-tertiary, currentColor));
+	pointer-events: none;
+}
+${openRun} > [data-tool-summary] {
+	position: relative;
+	z-index: 1;
+	block-size: 0;
+	overflow: visible;
+}
+${openRun} > [data-tool-summary] > * {
+	pointer-events: none;
+}
+${openRun} > [data-tool-summary] > * > :not(button) {
+	visibility: hidden;
+}
+${openRun} > [data-tool-summary] button[aria-expanded] {
+	position: absolute;
+	inset-block-start: 0;
+	inset-inline-start: 0;
+	inline-size: 1rem;
+	max-inline-size: none;
+	block-size: var(--conversation-line-height);
+	pointer-events: auto;
+}
+${openRun} > [data-tool-summary] button[aria-expanded] > * {
+	position: absolute;
+	inline-size: 1px;
+	block-size: 1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+}
+${openRun} > div:not([data-tool-ticker]) > [data-tool-row]:first-child::before {
+	inset-block-start: calc(var(--conversation-line-height) / 2 + ${toggleBox} / 2);
+}
+${openRun} > div:not([data-tool-ticker]) > [data-tool-row]:first-child::after {
+	inset-inline-start: calc(0.375rem + 0.5px + ${toggleBox} / 2);
+	inline-size: calc(0.5rem - 0.5px - ${toggleBox} / 2);
+}
+`
+
+export function installTreeToggle(doc = document, getPreferences = () => defaultPreferences) {
+	const style = doc.createElement('style')
+	style.dataset.hermesTreeToggle = ID
+	doc.head.append(style)
+	const refresh = () => { style.textContent = getPreferences().treeToggle ? treeToggleStyles : '' }
+	refresh()
+	return { refresh, dispose: () => style.remove() }
+}
 
 // Native expanded calls cap output/payloads at 5rem (about four lines), error bodies at 14rem and diffs at 12rem, so reading a result means scrolling a tiny box. Triple each cap; max-height leaves short results at their natural height. The viewport bound keeps a long result one scroller that fits on screen. The review pane's diffs sit outside tool rows and keep their own sizing.
 const toolDetail = `${scope} [data-tool-row]`
@@ -195,7 +357,7 @@ ${toolDetail} :is([data-slot="file-diff-panel"], [data-slot="diff-lines"]) {
 export function installWidePreviews(doc = document) {
 	const style = doc.createElement('style')
 	style.dataset.hermesPlugin = ID
-	style.textContent = previewStyles + toolLayoutStyles + toolDetailStyles + resyncStyles
+	style.textContent = previewStyles + toolLayoutStyles + timestampStyles + toolDetailStyles + resyncStyles
 	doc.head.append(style)
 	return () => style.remove()
 }
@@ -861,7 +1023,7 @@ export default {
 	id: ID,
 	name: NAME,
 	description: 'Full-width previews, tool/edit defaults, independent queue, prompt-text, and status-stack preferences, and resync of duplicated chat messages.',
-	version: '0.7.0',
+	version: '0.8.0',
 	register(ctx) {
 		let preferences = readPreferences(ctx.storage)
 		const getPreferences = () => preferences
@@ -872,6 +1034,8 @@ export default {
 		ctx.onDispose(status.dispose)
 		const prompts = installPromptTextDefaults(document, getPreferences)
 		ctx.onDispose(prompts.dispose)
+		const tree = installTreeToggle(document, getPreferences)
+		ctx.onDispose(tree.dispose)
 		for (const store of [host.state.focusedStoredSessionId || host.state.activeSessionId, host.state.profile, host.state.connectionId]) {
 			if (store?.listen) ctx.onDispose(store.listen(status.navigate))
 		}
@@ -889,6 +1053,7 @@ export default {
 			duplicates?.refresh()
 			status.refresh()
 			prompts.refresh()
+			tree.refresh()
 			return preferences
 		}
 		const page = {

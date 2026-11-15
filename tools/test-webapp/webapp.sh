@@ -117,6 +117,8 @@ sync)
 	;;
 seed)
 	start
+	# Transcript timestamps exercise the plugin's time layout. Display-only: no model context changes.
+	in_box hermes config set display.timestamps true >/dev/null
 	"$RUNTIME" cp "$HERE/seed.py" "$NAME:/opt/data/ui-tweaks-seed.py"
 	in_box /opt/hermes/.venv/bin/python /opt/data/ui-tweaks-seed.py
 	;;

@@ -91,24 +91,77 @@ async function smoke(page, context, shot) {
 		})
 		check(Math.abs(indentation - 16) < 1, `Tool indentation must be 16px, got ${indentation}`)
 		report.checks.push('native tool group expanded, edit folded, rows indented 16px')
+		// Hit tests need the startup Connecting overlay gone: it covers the shell while the app underneath is already interactive.
+		await page.getByText(/^connecting[.… ]*$/i).waitFor({ state: 'hidden' })
 		const connectors = await page.locator('[data-tool-group]').first().evaluate(el => {
-			const summary = el.querySelector('[data-tool-summary]').getBoundingClientRect()
-			return { summaryBottom: summary.bottom, rows: Array.from(el.querySelectorAll(':scope > div > [data-tool-row]'), row => {
-				const rect = row.getBoundingClientRect()
-				const before = getComputedStyle(row, '::before')
-				const after = getComputedStyle(row, '::after')
-				return { content: before.content, top: rect.top + parseFloat(before.top), bottom: rect.top + parseFloat(before.top) + parseFloat(before.height), branch: rect.top + parseFloat(after.top), stroke: before.borderInlineStartWidth, branchStroke: after.borderBlockStartWidth, pointerEvents: before.pointerEvents }
-			}) }
+			const summary = el.querySelector('[data-tool-summary]')
+			const toggle = summary.querySelector('button[aria-expanded]')
+			const at = toggle.getBoundingClientRect()
+			const box = getComputedStyle(toggle, '::before')
+			const boxRect = { left: at.left + parseFloat(box.left), top: at.top + parseFloat(box.top), width: parseFloat(box.width), height: parseFloat(box.height) }
+			const center = { x: boxRect.left + boxRect.width / 2, y: boxRect.top + boxRect.height / 2 }
+			const first = el.querySelector(':scope > div > [data-tool-row] button[aria-expanded]')
+			const firstAt = first.getBoundingClientRect()
+			return {
+				summaryHeight: summary.getBoundingClientRect().height,
+				groupTop: el.getBoundingClientRect().top,
+				box: boxRect,
+				boxHit: toggle.contains(document.elementFromPoint(center.x, center.y)),
+				hitTag: (({ tagName, className, dataset }) => `${tagName} ${String(className).slice(0, 60)} ${JSON.stringify(dataset)}`)(document.elementFromPoint(center.x, center.y) || { tagName: 'none', className: '', dataset: {} }),
+				firstHit: first.contains(document.elementFromPoint(firstAt.left + 4, firstAt.top + firstAt.height / 2)),
+				name: toggle.textContent.trim(),
+				rows: Array.from(el.querySelectorAll(':scope > div > [data-tool-row]'), row => {
+					const rect = row.getBoundingClientRect()
+					const before = getComputedStyle(row, '::before')
+					const after = getComputedStyle(row, '::after')
+					return { top: rect.top, content: before.content, railTop: rect.top + parseFloat(before.top), bottom: rect.top + parseFloat(before.top) + parseFloat(before.height), branch: rect.top + parseFloat(after.top), stroke: before.borderInlineStartWidth, branchStroke: after.borderBlockStartWidth, pointerEvents: before.pointerEvents }
+				})
+			}
 		})
 		check(connectors.rows.length >= 2, 'Native group must expose multiple branches')
-		check(Math.abs(connectors.rows[0].top - connectors.summaryBottom) < 1, 'Tree rail must join the native summary without a gap')
+		check(connectors.summaryHeight === 0 && Math.abs(connectors.rows[0].top - connectors.groupTop) < 1, 'An open list must drop its summary line and start with its first call')
+		check(connectors.boxHit && connectors.name.length > 0, `The minus box must be the native, still labelled summary toggle, got ${JSON.stringify({ box: connectors.box, hit: connectors.boxHit, name: connectors.name, hitTag: connectors.hitTag })}`)
+		check(connectors.firstHit, 'The hidden summary must not cover the first call’s toggle')
+		check(Math.abs(connectors.rows[0].branch - (connectors.box.top + connectors.box.height / 2)) < 1, 'The box must sit level with the first call')
+		check(Math.abs(connectors.rows[0].railTop - (connectors.box.top + connectors.box.height)) < 1, 'Tree rail must start at the box without a gap')
 		for (const [index, line] of connectors.rows.entries()) {
 			check(line.content === '""' && line.stroke === '1px' && line.branchStroke === '1px', 'Each native row must paint both connector strokes')
 			check(line.pointerEvents === 'none', 'Connectors must not intercept native controls')
-			if (index) check(Math.abs(connectors.rows[index - 1].bottom - line.top) < 1, 'Native tree rail must stay continuous between calls')
+			if (index) check(Math.abs(connectors.rows[index - 1].bottom - line.railTop) < 1, 'Native tree rail must stay continuous between calls')
 		}
 		check(Math.abs(connectors.rows.at(-1).bottom - connectors.rows.at(-1).branch) < 1, 'Last native branch must end in an L')
-		report.checks.push('continuous tree rail from summary to calls, final L, noninteractive decoration')
+		report.checks.push('open list drops its summary for a minus box on a continuous tree rail, final L, noninteractive decoration')
+		const sizes = await page.locator('[data-tool-group]').first().evaluate(el => {
+			// A probe in the message content resolves Desktop's own token there, outside the tool blocks.
+			const probe = document.createElement('span')
+			probe.style.fontSize = 'var(--conversation-tool-font-size)'
+			el.parentElement.append(probe)
+			const native = parseFloat(getComputedStyle(probe).fontSize)
+			probe.remove()
+			const labelFont = root => parseFloat(getComputedStyle(Array.from(root.querySelectorAll('span')).find(span => !span.childElementCount && span.textContent.trim())).fontSize)
+			const edit = el.parentElement.querySelector(':scope > [data-tool-row]')
+			return { native, rowFont: labelFont(el.querySelector(':scope > div > [data-tool-row]')), editFont: labelFont(edit), editGap: edit.getBoundingClientRect().top - el.getBoundingClientRect().bottom }
+		})
+		check(Math.abs(sizes.rowFont / sizes.native - 10 / 11) < 0.01 && Math.abs(sizes.editFont - sizes.rowFont) < 0.01, `Tool calls must run one native step smaller, inside and outside lists, got ${JSON.stringify(sizes)}`)
+		check(Math.abs(sizes.editGap) < 0.5, `The edit after the list must touch it, got ${sizes.editGap}`)
+		report.checks.push('tool calls one native step smaller, adjacent tool blocks gapless')
+		const times = await page.locator('[data-slot="aui_assistant-message-content"]').first().evaluate(content => {
+			const stamp = content.querySelector(':scope > [data-slot="timeline-timestamp"]')
+			if (!stamp) return null
+			const prose = stamp.nextElementSibling
+			const range = document.createRange()
+			range.selectNodeContents(prose)
+			const line = Array.from(range.getClientRects()).find(rect => rect.width && rect.height < 40)
+			const at = stamp.getBoundingClientRect()
+			const footer = content.parentElement.querySelector(':scope > [data-slot="timeline-timestamp"]')
+			const summaryTime = content.querySelector('[data-tool-row] [data-slot="timeline-timestamp"]')
+			return { float: getComputedStyle(stamp).float, right: at.right, contentRight: content.getBoundingClientRect().right, level: Math.abs((at.top + at.bottom) / 2 - (line.top + line.bottom) / 2), footerHeight: footer?.getBoundingClientRect().height, callTimeRight: summaryTime?.getBoundingClientRect().right }
+		})
+		check(times !== null, 'The seed enables display.timestamps; rerun `npm run webapp -- seed` and reload')
+		check(times.float !== 'none' && Math.abs(times.right - times.contentRight) < 1 && times.level < 2, `Prose times must share the first line at its end, got ${JSON.stringify(times)}`)
+		check(times.footerHeight === 0, 'The message time must not take its own line')
+		check(Math.abs(times.callTimeRight - times.right) < 1, 'Prose and call times must share one end column')
+		report.checks.push('prose and message times share existing lines, in the tool rows’ end column')
 		report.treeScreenshot = await shot('integration-tool-tree')
 		await editToggle().click()
 		await page.locator('[data-tool-row] [data-slot="file-diff-panel"]').waitFor()
@@ -191,6 +244,14 @@ async function smoke(page, context, shot) {
 		const detailRow = page.getByText('Details: taller output', { exact: true }).locator('xpath=ancestor::div[contains(@class, "@container")][1]')
 		check(await detailRow.getByText('Always on', { exact: true }).count() === 1 && await detailRow.locator('button, input, [role="switch"]').count() === 0, 'Taller details must be listed as always on without a switch')
 		report.checks.push('categorized settings with always-on full-width preview and taller-details rows without switches')
+		const treeSwitch = page.getByRole('switch', { name: 'Lists: tree toggle instead of summary line', exact: true })
+		const treeStyled = () => page.evaluate(() => Boolean(document.querySelector('style[data-hermes-tree-toggle]')?.textContent))
+		check(await treeSwitch.getAttribute('aria-checked') === 'true' && await treeStyled(), 'The tree toggle must be on by default')
+		await treeSwitch.click()
+		check(await treeSwitch.getAttribute('aria-checked') === 'false' && !await treeStyled(), 'Switching the tree toggle off must restore native summaries without a reload')
+		await treeSwitch.click()
+		check(await treeStyled(), 'Switching it back on must apply it again')
+		report.checks.push('tree-toggle switch applies live in both directions')
 		check(await expandSwitch.getAttribute('aria-checked') === 'true', 'Native settings must show expand enabled')
 		await expandSwitch.click()
 		check(await expandSwitch.getAttribute('aria-checked') === 'false', 'Native switch must turn off')
