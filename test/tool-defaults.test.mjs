@@ -309,7 +309,7 @@ test('settings group controls and show full-width previews as a noninteractive f
 		assert.equal(await previewRow.getByText('Always on', { exact: true }).count(), 1)
 		assert.equal(await previewRow.locator('button, input, [role="switch"]').count(), 0)
 		assert.equal(await conversation.getByRole('switch', { name: 'Duplicated messages: resync automatically', exact: true }).count(), 1)
-		assert.equal(await settings.getByRole('switch').count(), 7)
+		assert.equal(await settings.getByRole('switch').count(), 8)
 	} finally { await page.close() }
 })
 

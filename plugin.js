@@ -6,7 +6,7 @@ import { jsx, jsxs } from 'react/jsx-runtime'
 /** Customize chat presentation without changing preview documents or stored messages. */
 const ID = 'hermes-wide-previews'
 const NAME = 'Hermes UI Tweaks'
-const defaultPreferences = { expandToolCalls: true, foldFileEdits: true, foldStatusStack: true, expandQueuedPrompts: true, expandQueuedPromptText: true, expandHistoryPrompts: true, autoResync: true }
+const defaultPreferences = { expandToolCalls: true, foldFileEdits: true, tallerToolDetails: true, foldStatusStack: true, expandQueuedPrompts: true, expandQueuedPromptText: true, expandHistoryPrompts: true, autoResync: true }
 
 function readPreferences(storage) {
 	const saved = storage.get('preferences', {})
@@ -44,10 +44,11 @@ function SettingsPage({ getPreferences, updatePreference }) {
 						checked: preferences.foldFileEdits,
 						onChange: change('foldFileEdits')
 					}),
-					jsx(ListRow, {
-						title: 'Details: taller output',
-						description: 'Opened calls and diffs show up to three times more lines before scrolling, within the window height. Short results keep their size.',
-						action: jsx('span', { className: 'text-sm text-(--ui-text-secondary)', children: 'Always on' })
+					jsx(ToggleRow, {
+						label: 'Output and diffs: taller boxes',
+						description: 'Opened calls and file-edit diffs show up to three times more lines before scrolling, within the window height. Short results keep their size.',
+						checked: preferences.tallerToolDetails,
+						onChange: change('tallerToolDetails')
 					})
 				]
 			}),
@@ -98,7 +99,7 @@ function SettingsPage({ getPreferences, updatePreference }) {
 			}),
 			jsx('p', {
 				className: 'mt-4 text-sm text-(--ui-text-secondary)',
-				children: 'Changes apply without reloading. Turning a default off leaves the current layout unchanged. Manual choices are retained; queue updates can reopen the status drawer.'
+				children: 'Changes apply without reloading. Turning a default off leaves already open or folded items as they are. Manual choices are retained; queue updates can reopen the status drawer.'
 			})
 		]
 	})
@@ -192,12 +193,13 @@ ${toolDetail} :is([data-slot="file-diff-panel"], [data-slot="diff-lines"]) {
 }
 `
 
-export function installWidePreviews(doc = document) {
+export function installWidePreviews(doc = document, getPreferences = () => defaultPreferences) {
 	const style = doc.createElement('style')
 	style.dataset.hermesPlugin = ID
-	style.textContent = previewStyles + toolLayoutStyles + toolDetailStyles + resyncStyles
+	const refresh = () => { style.textContent = previewStyles + toolLayoutStyles + (getPreferences().tallerToolDetails ? toolDetailStyles : '') + resyncStyles }
+	refresh()
 	doc.head.append(style)
-	return () => style.remove()
+	return { refresh, dispose: () => style.remove() }
 }
 
 // Hermes persists these same disclosures when its own buttons are clicked.
@@ -861,11 +863,12 @@ export default {
 	id: ID,
 	name: NAME,
 	description: 'Full-width previews, tool/edit defaults, independent queue, prompt-text, and status-stack preferences, and resync of duplicated chat messages.',
-	version: '0.7.0',
+	version: '0.8.0',
 	register(ctx) {
 		let preferences = readPreferences(ctx.storage)
 		const getPreferences = () => preferences
-		ctx.onDispose(installWidePreviews())
+		const styles = installWidePreviews(document, getPreferences)
+		ctx.onDispose(styles.dispose)
 		const tools = installToolDefaults(document, getPreferences)
 		ctx.onDispose(tools.dispose)
 		const status = installStatusDefaults(document, getPreferences, ctx.storage)
@@ -885,6 +888,7 @@ export default {
 		const updatePreference = (key, on) => {
 			preferences = { ...preferences, [key]: on }
 			ctx.storage.set('preferences', preferences)
+			styles.refresh()
 			tools.refresh()
 			duplicates?.refresh()
 			status.refresh()

@@ -57,3 +57,31 @@ test('triples tool detail caps, keeps short results and other scrollers, and res
 		assert.deepEqual(await heights(page), native)
 	} finally { await page.close() }
 })
+
+const label = 'Output and diffs: taller boxes'
+const switchChecked = page => page.getByRole('switch', { name: label, exact: true }).getAttribute('aria-checked')
+
+test('one switch restores and reapplies both output and diff heights live, and persists off', async () => {
+	const page = await browser.newPage({ viewport: { width: 900, height: 2000 } })
+	try {
+		await page.route('https://fixture.invalid/**', route => route.fulfill({ contentType: 'text/html', body: fixtureHtml }))
+		await page.goto('https://fixture.invalid/')
+		const native = await heights(page)
+		await activatePlugin(page, source)
+		await page.evaluate(() => window.mountPluginSettings())
+		assert.equal(await switchChecked(page), 'true', 'taller boxes must be on by default')
+		await page.getByRole('switch', { name: label, exact: true }).click()
+		assert.equal(await switchChecked(page), 'false')
+		const off = await heights(page)
+		for (const id of ['output', 'error', 'diff', 'diff-lines']) assert.equal(off[id], native[id], `${id} must return to its native height`)
+		assert.equal(await page.locator('style[data-hermes-plugin]').count(), 1, 'turning it off must keep the other plugin styles')
+		await page.getByRole('switch', { name: label, exact: true }).click()
+		const on = await heights(page)
+		for (const id of ['output', 'diff']) assert.equal(on[id], native[id] * 3, `${id} must grow again without reloading`)
+		await page.getByRole('switch', { name: label, exact: true }).click()
+		await page.evaluate(() => window.disposePlugin())
+		await activatePlugin(page, source)
+		const reloaded = await heights(page)
+		for (const id of ['output', 'diff']) assert.equal(reloaded[id], native[id], `${id} must stay native after reactivation with the switch off`)
+	} finally { await page.close() }
+})

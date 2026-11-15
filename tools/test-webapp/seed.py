@@ -44,10 +44,11 @@ for suffix in ("tools", "preview", "long-prompts", "long-output"):
 	if suffix == "long-output":
 		# Long enough to overflow both the native and the tripled caps of an opened call.
 		output = "\n".join(f"Invented output line {index}" for index in range(1, 81))
-		diff = "--- a/long.txt\n+++ b/long.txt\n@@ -1,40 +1,40 @@\n" + "\n".join(f"-Invented old line {index}\n+Invented new line {index}" for index in range(1, 41))
+		# A TypeScript path takes the syntax-highlighted diff renderer used for code files.
+		diff = "--- a/long.ts\n+++ b/long.ts\n@@ -1,40 +1,40 @@\n" + "\n".join(f"-const invented{index} = 'old line {index}'\n+const invented{index} = 'new line {index}'" for index in range(1, 41))
 		calls = [
 			("long-terminal", "terminal", {"command": "seq 80"}, {"output": output, "exit_code": 0, "error": None}),
-			("long-patch", "patch", {"mode": "replace", "path": str(WORKSPACE / "long.txt"), "old_string": "old", "new_string": "new"}, {"success": True, "path": str(WORKSPACE / "long.txt"), "diff": diff}),
+			("long-patch", "patch", {"mode": "replace", "path": str(WORKSPACE / "long.ts"), "old_string": "old", "new_string": "new"}, {"success": True, "path": str(WORKSPACE / "long.ts"), "diff": diff}),
 		]
 		db.append_message(sid, "user", content="Show long invented tool output.")
 		db.append_message(sid, "assistant", content="", tool_calls=[{"id": ident, "type": "function", "function": {"name": name, "arguments": json.dumps(args)}} for ident, name, args, result in calls])
