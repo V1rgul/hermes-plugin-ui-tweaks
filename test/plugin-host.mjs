@@ -30,6 +30,20 @@ const bundle = await build({
 	define: { 'process.env.NODE_ENV': '"production"' }
 })
 
+// Runs in the page: counts its real selector searches, for discovery-cost regressions. `window.searches(text)` counts calls whose selector contains `text`, optionally from one root; `window.searches.reset()` starts a new count.
+export function countSearches() {
+	const calls = []
+	for (const { prototype } of [Element, Document, DocumentFragment]) {
+		const search = prototype.querySelectorAll
+		prototype.querySelectorAll = function (selector) {
+			calls.push({ selector, root: this })
+			return search.call(this, selector)
+		}
+	}
+	window.searches = (text, root) => calls.filter(call => call.selector.includes(text) && (!root || call.root === root)).length
+	window.searches.reset = () => { calls.length = 0 }
+}
+
 export async function activatePlugin(page, source, { disposeImmediately = false, legacySettingsApi = false } = {}) {
 	if (!await page.evaluate(() => Boolean(window.pluginReact))) await page.addScriptTag({ content: bundle.outputFiles[0].text })
 	await page.evaluate(async ({ source, disposeImmediately, legacySettingsApi }) => {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { before, after, test } from 'node:test'
-import { activatePlugin } from './plugin-host.mjs'
+import { activatePlugin, countSearches } from './plugin-host.mjs'
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const source = await readFile(process.env.PLUGIN_SOURCE || new URL('../plugin.js', import.meta.url), 'utf8')
@@ -370,5 +370,127 @@ test('queue and status switches apply independently without reload and persist s
 		assert.equal(await page.getByRole('switch', { name: queueLabel, exact: true }).getAttribute('aria-checked'), 'false')
 		assert.equal(await page.getByRole('switch', { name: label, exact: true }).getAttribute('aria-checked'), 'true')
 		assert.equal(await page.locator('.status-section-trigger').getAttribute('aria-expanded'), 'false')
+	} finally { await page.close() }
+})
+
+const queueLabel = 'Queued prompts: expand list by default'
+const queueExpanded = (page, value) => page.waitForFunction(value => document.querySelector('.status-section-trigger')?.getAttribute('aria-expanded') === String(value), value)
+
+test('one delivery of many changes in a composer searches its dock once and leaves the other composer alone', async () => {
+	const page = await fixture()
+	try {
+		await page.evaluate(() => { window.setFirstQueue = window.setFixtureQueue })
+		await page.evaluate(nativeFixture, { scope: ['local', 'default', 'default', 'chat-b'] })
+		await page.evaluate(countSearches)
+		await activatePlugin(page, source)
+		await settle(page)
+		const grips = page.locator('[data-slot="status-drawer-toggle"]')
+		assert.deepEqual(await grips.evaluateAll(els => els.map(el => el.getAttribute('aria-expanded'))), ['false', 'false'])
+		await page.evaluate(() => {
+			window.searches.reset()
+			const [first, second] = document.querySelectorAll('[data-slot="composer-dock"]')
+			window.docks = { first, second }
+			// An independent observer with the plugin's options sees the same deliveries; count those touching the first dock.
+			window.deliveries = 0
+			new MutationObserver(records => { if (records.some(record => first.contains(record.target))) window.deliveries++ }).observe(document, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['aria-expanded', 'inert', 'aria-hidden'] })
+			// Activity rows appear and stream text while a prompt is queued, all in one task.
+			const stack = first.querySelector('[data-slot="composer-status-stack"]')
+			const rows = Array.from({ length: 5 }, (_, i) => {
+				const row = document.createElement('div')
+				row.textContent = `Invented activity ${i}`
+				stack.append(row)
+				return row
+			})
+			for (const row of rows) row.firstChild.nodeValue += ' (running)'
+			window.setFirstQueue(1)
+		})
+		// Read the grips without a selector search of the kind being counted.
+		await page.waitForFunction(() => [...document.getElementsByTagName('button')].filter(el => el.dataset.slot === 'status-drawer-toggle').map(el => el.getAttribute('aria-expanded')).join(',') === 'true,false')
+		await queueExpanded(page, true)
+		await settle(page)
+		const counts = await page.evaluate(() => ({ first: window.searches('status-drawer-toggle', window.docks.first), second: window.searches('status-drawer-toggle', window.docks.second), all: window.searches('status-drawer-toggle'), deliveries: window.deliveries }))
+		console.log(`status grip searches for ${counts.deliveries} deliveries in one dock: ${JSON.stringify(counts)}`)
+		assert.deepEqual(counts, { first: counts.deliveries, second: 0, all: counts.deliveries, deliveries: counts.deliveries })
+		assert.ok(counts.deliveries > 0)
+	} finally { await page.close() }
+})
+
+test('with status defaults off, nothing is searched, manual opens persist, and re-enabling applies without overriding them', async () => {
+	const page = await fixture({}, { foldStatusStack: false, expandQueuedPrompts: false })
+	try {
+		await page.evaluate(countSearches)
+		await activatePlugin(page, source)
+		await expanded(page, true)
+		// While off, an explicit close then open is still saved for this exact scope.
+		await toggle(page).click()
+		await expanded(page, false)
+		await toggle(page).click()
+		await expanded(page, true)
+		await settle(page)
+		await page.evaluate(() => window.setFixtureQueue(1))
+		await settle(page)
+		const searches = await page.evaluate(() => window.searches('status-drawer-toggle'))
+		console.log(`status grip searches with both defaults off: ${searches}`)
+		assert.equal(searches, 0)
+		assert.deepEqual(await page.evaluate(key => JSON.parse(localStorage.getItem(key)), opensKey), [JSON.stringify(['local', 'default', 'default', 'chat-a'])])
+		assert.equal(await page.locator('.status-section-trigger').getAttribute('aria-expanded'), 'false')
+		await settings(page)
+		await page.getByRole('switch', { name: queueLabel, exact: true }).click()
+		await queueExpanded(page, true)
+		await page.getByRole('switch', { name: label, exact: true }).click()
+		await page.evaluate(() => window.setFixtureQueue(0))
+		await settle(page)
+		await expanded(page, true)
+	} finally { await page.close() }
+})
+
+test('switching queue expansion off and on again reopens a queue collapsed meanwhile', async () => {
+	const page = await fixture({ queued: 1 }, { foldStatusStack: false })
+	try {
+		await activatePlugin(page, source)
+		await queueExpanded(page, true)
+		await settings(page)
+		await page.getByRole('switch', { name: queueLabel, exact: true }).click()
+		await page.locator('.status-section-trigger').click()
+		await queueExpanded(page, false)
+		await settle(page)
+		await page.getByRole('switch', { name: queueLabel, exact: true }).click()
+		await queueExpanded(page, true)
+	} finally { await page.close() }
+})
+
+test('native drawer storage is reread at every click boundary but parsed only when its text changes', async () => {
+	const page = await fixture()
+	try {
+		await page.evaluate(key => {
+			// Malformed storage reads as no closed drawer; the fixture's next native click replaces it.
+			localStorage.setItem(key, '[not json')
+			window.storage = { reads: 0, parses: 0 }
+			const raws = new Set()
+			const { getItem } = Storage.prototype
+			Storage.prototype.getItem = function (name) {
+				const raw = getItem.call(this, name)
+				if (name === key) { window.storage.reads++; raws.add(raw) }
+				return raw
+			}
+			const { parse } = JSON
+			JSON.parse = (text, ...rest) => {
+				if (raws.has(text)) window.storage.parses++
+				return parse(text, ...rest)
+			}
+		}, nativeKey)
+		await activatePlugin(page, source)
+		await expanded(page, false)
+		for (const open of [true, false, true]) {
+			await toggle(page).click()
+			await expanded(page, open)
+		}
+		await settle(page)
+		const clicks = await page.evaluate(() => window.clicks.length)
+		const { reads, parses } = await page.evaluate(() => window.storage)
+		console.log(`native drawer storage for ${clicks} clicks: ${reads} reads, ${parses} parses`)
+		// Each click is read before and after; consecutive boundaries share a text, which is parsed once.
+		assert.deepEqual({ reads, parses }, { reads: 2 * clicks, parses: clicks + 1 })
+		assert.deepEqual(await page.evaluate(key => JSON.parse(localStorage.getItem(key)), opensKey), [JSON.stringify(['local', 'default', 'default', 'chat-a'])], 'the last explicit open is the saved choice')
 	} finally { await page.close() }
 })

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { before, after, test } from 'node:test'
-import { activatePlugin } from './plugin-host.mjs'
+import { activatePlugin, countSearches } from './plugin-host.mjs'
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const source = await readFile(process.env.PLUGIN_SOURCE || new URL('../plugin.js', import.meta.url), 'utf8')
@@ -186,5 +186,53 @@ test('text preferences persist across reloads and disposal restores the native h
 		await page.evaluate(() => { window.queueEntries.push('after-dispose'); window.renderQueue() })
 		await settle(page)
 		assert.equal(await queuedToggle(page, 'after-dispose').getAttribute('aria-expanded'), 'false')
+	} finally { await page.close() }
+})
+
+test('a queue list opening with several prompts is searched once per delivery, and each prompt still expands', async () => {
+	const page = await fixture({ expandQueuedPrompts: false }, { queueOpen: false })
+	try {
+		await page.evaluate(countSearches)
+		await activatePlugin(page, source)
+		await settle(page)
+		await page.evaluate(() => {
+			window.queueEntries.push('second', 'third', 'fourth')
+			window.searches.reset()
+			// An independent observer sees the same deliveries as the plugin's; count those adding elements.
+			window.additions = 0
+			new MutationObserver(records => { if (records.some(record => [...record.addedNodes].some(node => node.nodeType === 1))) window.additions++ }).observe(document, { childList: true, subtree: true, attributes: true })
+		})
+		// Opening the list mounts its body, then every row inside it.
+		await page.locator('#queue .status-section-trigger').click()
+		for (const id of ['first', 'second', 'third', 'fourth']) await expectExpanded(queuedToggle(page, id), true)
+		await settle(page)
+		const counts = await page.evaluate(() => ({ searches: window.searches('status-row-actions'), deliveries: window.additions }))
+		console.log(`prompt discovery searches for ${counts.deliveries} deliveries adding nested elements: ${counts.searches}`)
+		assert.equal(counts.searches, counts.deliveries)
+	} finally { await page.close() }
+})
+
+test('with both text defaults off, nothing is searched, and re-enabling expands untouched prompts only', async () => {
+	const page = await fixture({ expandQueuedPromptText: false, expandHistoryPrompts: false, expandQueuedPrompts: false })
+	try {
+		await page.evaluate(countSearches)
+		await activatePlugin(page, source)
+		await expectExpanded(queuedToggle(page), false)
+		// While off: a queued prompt opened then closed again.
+		for (const expected of [true, false]) {
+			await queuedToggle(page).click()
+			await expectExpanded(queuedToggle(page), expected)
+		}
+		await page.evaluate(() => { window.queueEntries.push('late'); window.renderQueue() })
+		await settle(page)
+		const searches = await page.evaluate(() => window.searches('status-row-actions') + window.searches('aui_user-touch-expand'))
+		console.log(`prompt discovery searches with both defaults off: ${searches}`)
+		assert.equal(searches, 0)
+		await settings(page)
+		await page.getByRole('switch', { name: queuedLabel }).click()
+		await expectExpanded(queuedToggle(page, 'late'), true)
+		await settle(page)
+		await expectExpanded(queuedToggle(page), false)
+		await expectExpanded(page.locator('#spectator-history button[aria-expanded]'), false)
 	} finally { await page.close() }
 })

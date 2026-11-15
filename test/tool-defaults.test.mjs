@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { before, after, test } from 'node:test'
-import { activatePlugin } from './plugin-host.mjs'
+import { activatePlugin, countSearches } from './plugin-host.mjs'
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const source = await readFile(process.env.PLUGIN_SOURCE || new URL('../plugin.js', import.meta.url), 'utf8')
@@ -455,5 +455,100 @@ test('repeated plugin reloads leave one controller and do not fight manual choic
 		await page.evaluate(() => { window.groups.push({ id: 'after-reloads', rows: [{ id: 'after-read' }, { id: 'after-patch', edit: true, diff: true }] }); window.render() })
 		await settle(page)
 		assert.equal(await page.evaluate(() => window.clicks.filter(click => click.id === 'after-reloads').length), 0)
+	} finally { await page.close() }
+})
+
+test('a mutation delivery searches a newly mounted run once, and its defaults still apply', async () => {
+	const page = await fixture([{ id: 'run', rows: [ordinary, edit] }])
+	try {
+		await page.evaluate(countSearches)
+		await activate(page)
+		await settle(page)
+		await page.evaluate(() => {
+			window.searches.reset()
+			// An independent observer sees the same deliveries as the plugin's; count those adding elements.
+			window.additions = 0
+			new MutationObserver(records => { if (records.some(record => [...record.addedNodes].some(node => node.nodeType === 1))) window.additions++ }).observe(document, { childList: true, subtree: true, attributes: true })
+			// React commits a run as a root with its summary, list and rows inside.
+			window.groups.push({ id: 'late', rows: [{ id: 'late-read' }, { id: 'late-search' }, { id: 'late-patch', edit: true, diff: true }, { id: 'late-write', edit: true, diff: true }] })
+			window.render()
+		})
+		await expectExpanded(groupToggle(page, 'late'), true)
+		for (const id of ['late-read', 'late-patch', 'late-write']) await expectExpanded(rowToggle(page, id), false)
+		await settle(page)
+		const counts = await page.evaluate(() => ({ searches: window.searches('data-tool-'), deliveries: window.additions }))
+		console.log(`tool discovery searches for ${counts.deliveries} deliveries adding nested elements: ${counts.searches}`)
+		assert.equal(counts.searches, counts.deliveries, 'one search per delivery that added nested elements')
+	} finally { await page.close() }
+})
+
+test('with both tool defaults off, nothing is searched, and re-enabling applies them without overriding manual choices', async () => {
+	const page = await fixture([{ id: 'run', rows: [{ id: 'run-read' }, { id: 'run-search' }] }, { id: 'edits', rows: [{ id: 'edits-read' }, edit] }])
+	try {
+		await page.evaluate(key => localStorage.setItem(key, JSON.stringify({ expandToolCalls: false, foldFileEdits: false })), preferenceStorageKey)
+		await page.evaluate(countSearches)
+		await activate(page)
+		// While off: a list opened then closed again, and an edit's diff closed then reopened.
+		for (const expected of [true, false]) {
+			await groupToggle(page, 'run').click()
+			await expectExpanded(groupToggle(page, 'run'), expected)
+		}
+		await groupToggle(page, 'edits').click()
+		await expectExpanded(rowToggle(page, 'patch'), true)
+		for (const expected of [false, true]) {
+			await rowToggle(page, 'patch').click()
+			await expectExpanded(rowToggle(page, 'patch'), expected)
+		}
+		await page.evaluate(() => { window.groups.push({ id: 'late', rows: [{ id: 'late-read' }, { id: 'late-patch', edit: true, diff: true }] }); window.render() })
+		await settle(page)
+		const searches = await page.evaluate(() => window.searches('data-tool-'))
+		console.log(`tool discovery searches with both defaults off: ${searches}`)
+		assert.equal(searches, 0)
+		await showSettings(page)
+		await page.getByRole('switch', { name: expandLabel }).click()
+		await page.getByRole('switch', { name: foldLabel }).click()
+		await expectExpanded(groupToggle(page, 'late'), true)
+		await expectExpanded(rowToggle(page, 'late-patch'), false)
+		await settle(page)
+		await expectExpanded(groupToggle(page, 'run'), false)
+		await expectExpanded(rowToggle(page, 'patch'), true)
+	} finally { await page.close() }
+})
+
+test('native disclosure storage is reread at every boundary but parsed only when its text changes', async () => {
+	const page = await fixture([{ id: 'run', rows: [ordinary, ...['a', 'b', 'c', 'd', 'e'].map(id => ({ id: `edit-${id}`, edit: true, diff: true }))] }])
+	try {
+		await page.evaluate(key => {
+			// Malformed storage reads as no saved choice; the fixture's next native click replaces it.
+			localStorage.setItem(key, '{not json')
+			window.storage = { reads: 0, parses: 0 }
+			const raws = new Set()
+			const { getItem } = Storage.prototype
+			Storage.prototype.getItem = function (name) {
+				const raw = getItem.call(this, name)
+				if (name === key) { window.storage.reads++; raws.add(raw) }
+				return raw
+			}
+			const { parse } = JSON
+			JSON.parse = (text, ...rest) => {
+				if (raws.has(text)) window.storage.parses++
+				return parse(text, ...rest)
+			}
+		}, 'hermes.desktop.toolDisclosure.v1')
+		await activate(page)
+		await expectExpanded(groupToggle(page), true)
+		for (const id of ['a', 'b', 'c', 'd', 'e']) await expectExpanded(rowToggle(page, `edit-${id}`), false)
+		const clicks = await page.evaluate(() => window.clicks.length)
+		const { reads, parses } = await page.evaluate(() => window.storage)
+		console.log(`native disclosure storage for ${clicks} default clicks: ${reads} reads, ${parses} parses`)
+		// Each click is read before and after; consecutive boundaries share a text, which is parsed once.
+		assert.deepEqual({ reads, parses }, { reads: 2 * clicks, parses: clicks + 1 })
+		// A choice saved later is read afresh: on remount it is restored over the default.
+		await rowToggle(page, 'edit-c').click()
+		await expectExpanded(rowToggle(page, 'edit-c'), true)
+		await page.evaluate(() => window.remount())
+		await settle(page)
+		await expectExpanded(rowToggle(page, 'edit-c'), true)
+		await expectExpanded(rowToggle(page, 'edit-d'), false)
 	} finally { await page.close() }
 })

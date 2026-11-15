@@ -369,11 +369,28 @@ export function installWidePreviews(doc = document, getPreferences = () => defau
 const disclosureStorageKey = 'hermes.desktop.toolDisclosure.v1'
 const ownerSelector = '[data-tool-group], [data-tool-row]'
 
-function disclosureStates(doc) {
-	try {
-		const states = JSON.parse(doc.defaultView.localStorage.getItem(disclosureStorageKey) || '{}')
-		return states && typeof states === 'object' && !Array.isArray(states) ? states : {}
-	} catch { return {} }
+// Native clicks persist synchronously, so every before/after boundary still reads storage afresh. Only parsing is skipped while the exact raw text is unchanged; the shared snapshot is frozen.
+function storageReader(win, key, fallback, normalize) {
+	const empty = Object.freeze(JSON.parse(fallback))
+	let raw
+	let snapshot = empty
+	return () => {
+		let next
+		try { next = win.localStorage.getItem(key) } catch { return empty }
+		if (next !== raw) {
+			raw = next
+			try { snapshot = Object.freeze(normalize(JSON.parse(next || fallback))) } catch { snapshot = empty }
+		}
+		return snapshot
+	}
+}
+
+// One mutation delivery can report a subtree and nodes inside it: search each covered subtree once.
+function outermost(roots) {
+	return [...roots].filter(root => {
+		for (let node = root.parentNode; node; node = node.parentNode) if (roots.has(node)) return false
+		return true
+	})
 }
 
 function toggleFor(owner) {
@@ -387,6 +404,7 @@ export function installToolDefaults(doc = document, getPreferences = () => defau
 	const initialized = new WeakSet()
 	const candidates = new Set()
 	const restores = new Map()
+	const disclosureStates = storageReader(win, disclosureStorageKey, '{}', states => states && typeof states === 'object' && !Array.isArray(states) ? states : {})
 	let applying = false
 	let disposed = false
 	let frameId = null
@@ -420,9 +438,9 @@ export function installToolDefaults(doc = document, getPreferences = () => defau
 	function setDefault(owner, button, open) {
 		initialized.add(owner)
 		if (button.getAttribute('aria-expanded') === String(open)) return
-		const before = disclosureStates(doc)
+		const before = disclosureStates()
 		click(button)
-		const after = disclosureStates(doc)
+		const after = disclosureStates()
 		// Existing booleans are explicit native choices, including a manual toggle before plugin activation.
 		if (Object.keys(after).some(key => after[key] === open && typeof before[key] === 'boolean' && before[key] !== open)) {
 			restores.set(owner, { open: !open })
@@ -442,15 +460,21 @@ export function installToolDefaults(doc = document, getPreferences = () => defau
 		}
 	}
 
+	// Only enabled defaults are searched for; with both off nothing is, while manual clicks are still tracked below.
+	function ownerQuery() {
+		const { expandToolCalls, foldFileEdits } = getPreferences()
+		return [expandToolCalls && `${scope} [data-tool-group]`, foldFileEdits && `${scope} [data-tool-row]`].filter(Boolean).join(', ')
+	}
+
 	function queueOwner(node) {
 		const owner = node.nodeType === 1 ? node.closest(ownerSelector) : null
 		if (owner) candidates.add(owner)
 	}
 
-	function queueTree(node) {
+	function queueTree(node, query) {
 		if (node.nodeType !== 1 && node.nodeType !== 9) return
 		queueOwner(node)
-		for (const owner of node.querySelectorAll(`${scope} [data-tool-group], ${scope} [data-tool-row]`)) candidates.add(owner)
+		for (const owner of node.querySelectorAll(query)) candidates.add(owner)
 	}
 
 	function flush() {
@@ -471,13 +495,23 @@ export function installToolDefaults(doc = document, getPreferences = () => defau
 	}
 
 	const observer = new win.MutationObserver(records => {
-		for (const record of records) {
-			queueOwner(record.target)
-			if (record.attributeName === 'inert' || record.attributeName === 'aria-hidden') queueTree(record.target)
-			for (const node of record.addedNodes) queueTree(node)
+		const query = ownerQuery()
+		if (query) {
+			const roots = new Set()
+			for (const record of records) {
+				queueOwner(record.target)
+				if (record.attributeName === 'inert' || record.attributeName === 'aria-hidden') roots.add(record.target)
+				for (const node of record.addedNodes) roots.add(node)
+			}
+			for (const root of outermost(roots)) queueTree(root, query)
 		}
 		flush()
 	})
+	function refresh() {
+		const query = ownerQuery()
+		if (query) queueTree(doc, query)
+		flush()
+	}
 	doc.addEventListener('click', onClick, true)
 	observer.observe(doc, {
 		childList: true,
@@ -485,11 +519,10 @@ export function installToolDefaults(doc = document, getPreferences = () => defau
 		attributes: true,
 		attributeFilter: ['aria-expanded', 'data-file-edit', 'inert', 'aria-hidden']
 	})
-	queueTree(doc)
-	flush()
+	refresh()
 
 	return {
-		refresh() { queueTree(doc); flush() },
+		refresh,
 		dispose() {
 			disposed = true
 			observer.disconnect()
@@ -526,7 +559,8 @@ export function findDuplicateRun(blocks, { minChars = 80, singleChars = 200 } = 
 	const positions = new Map()
 	let best = null
 	blocks.forEach((text, j) => {
-		for (const i of positions.get(text) ?? []) {
+		const bucket = positions.get(text)
+		for (const i of bucket ?? []) {
 			// Measure each run once, from its first block.
 			if (i > 0 && blocks[i - 1] === blocks[j - 1]) continue
 			let length = 0
@@ -538,7 +572,8 @@ export function findDuplicateRun(blocks, { minChars = 80, singleChars = 200 } = 
 			// A resent prompt is not a paint duplicate: count assistant text only.
 			if (((length >= 2 && chars >= minChars) || chars >= singleChars) && chars > (best?.chars ?? 0)) best = { first: i, second: j, length, chars, text }
 		}
-		positions.set(text, [...positions.get(text) ?? [], j])
+		if (bucket) bucket.push(j)
+		else positions.set(text, [j])
 	})
 	return best
 }
@@ -554,31 +589,58 @@ export function installDuplicateResync({ doc = document, host, getPreferences = 
 	const waiters = new Set()
 	const proto = win.WebSocket?.prototype
 	const originalSend = proto?.send
+	let disposed = false
 	// The renderer opens its gateway socket before plugins load; its next outgoing frame identifies it.
 	function capturingSend(data) {
-		if (gatewaySocket.test(this.url)) {
-			sockets.add(this)
+		// After disposal, a wrapper installed above this one may still call it: it then only passes frames on.
+		if (!disposed && gatewaySocket.test(this.url)) {
+			if (!sockets.has(this)) {
+				pruneSockets()
+				sockets.add(this)
+			}
 			for (const resolve of waiters) resolve(this)
-			waiters.clear()
 		}
 		return originalSend.call(this, data)
 	}
 	if (originalSend) proto.send = capturingSend
-	const timers = new Set()
-	const wait = ms => new Promise(resolve => {
-		const timer = win.setTimeout(() => { timers.delete(timer); resolve() }, ms)
-		timers.add(timer)
+	// A reconnect brings a new socket: forget closing and closed ones instead of keeping every past connection.
+	function pruneSockets() {
+		for (const socket of sockets) if (socket.readyState > 1) sockets.delete(socket)
+	}
+	// Every wait settles when its timer fires or on disposal, so a resync never stays suspended on a cleared timer.
+	const timers = new Map()
+	function delay(ms, done) {
+		const timer = win.setTimeout(() => { timers.delete(timer); done() }, ms)
+		timers.set(timer, done)
+		return () => { win.clearTimeout(timer); timers.delete(timer) }
+	}
+	const wait = ms => new Promise(resolve => delay(ms, resolve))
+	// Whichever comes first, a captured socket or the timeout, removes the other.
+	const nextSocket = () => new Promise(resolve => {
+		const finish = socket => { cancel(); waiters.delete(finish); resolve(socket) }
+		const cancel = delay(socketWait, () => finish(null))
+		waiters.add(finish)
 	})
-	const nextSocket = () => Promise.race([new Promise(resolve => waiters.add(resolve)), wait(socketWait).then(() => null)])
 
 	const listeners = new Set()
-	const emit = () => { if (!disposed) listeners.forEach(listener => listener()) }
 	let running = null
 	let unresolved = null
-	let disposed = false
 	const activeId = () => host.state.activeSessionId.get()
 	const busy = id => Boolean(id && host.state.busyBySession.get()?.[id])
-	const duplicateIn = surface => surface?.isConnected ? findDuplicateRun(transcriptBlocks(surface)) : null
+	const scan = surface => surface?.isConnected ? findDuplicateRun(transcriptBlocks(surface)) : null
+	// One notification or check analyses each chat once. Nothing outlives it, so a later DOM change is always read afresh.
+	let batch = null
+	function analysing(read) {
+		if (batch) return read()
+		batch = new Map()
+		try { return read() } finally { batch = null }
+	}
+	function duplicateIn(surface) {
+		if (!batch) return scan(surface)
+		if (!batch.has(surface)) batch.set(surface, scan(surface))
+		return batch.get(surface)
+	}
+	const emit = () => { if (!disposed) analysing(() => listeners.forEach(listener => listener())) }
 
 	// The primary chat shows the active session. A split tile names only its stored session; its runtime id is
 	// known while the tile has focus, which clicking inside it gives.
@@ -607,22 +669,30 @@ export function installDuplicateResync({ doc = document, host, getPreferences = 
 		running = id
 		emit()
 		const started = Date.now()
+		// Disposal, or the chat switching away during an await, ends the resync without dispatching or reporting.
+		const current = () => !disposed && sessionOf(surface) === id
 		try {
+			pruneSockets()
 			let targets = [...sockets].filter(socket => socket.readyState === 1)
-			if (!targets.length) targets = [await nextSocket()].filter(Boolean)
+			if (!targets.length) {
+				targets = [await nextSocket()].filter(Boolean)
+				if (!current()) return
+			}
 			if (!targets.length) {
 				notify({ kind: 'warning', message: 'The gateway connection was not found. Reload the window to resync.' })
 				return
 			}
 			const frame = JSON.stringify({ jsonrpc: '2.0', method: 'event', params: { type: 'session.replay_gap', session_id: id, payload: { replay_epoch: 'hermes-ui-tweaks-resync', latest_seq: 0 } } })
 			for (const socket of targets) socket.dispatchEvent(new win.MessageEvent('message', { data: frame }))
-			let run = duplicateIn(surface)
-			for (let waited = 0; run && waited < verify && !disposed; waited += poll) {
+			// Verification always reads the chat afresh.
+			let run = scan(surface)
+			for (let waited = 0; run && waited < verify; waited += poll) {
 				await wait(poll)
-				run = duplicateIn(surface)
+				if (!current()) return
+				run = scan(surface)
 			}
 			// A chat switched away during the rebuild no longer shows this session: nothing to report.
-			if (disposed || sessionOf(surface) !== id) return
+			if (!current()) return
 			const main = surface.matches(mainSurface)
 			if (run) {
 				// Remember the leftover so automatic checks do not retry the same content forever.
@@ -645,13 +715,17 @@ export function installDuplicateResync({ doc = document, host, getPreferences = 
 	let checkTimer = null
 	function check() {
 		checkTimer = null
-		emit()
-		const id = activeId()
-		if (disposed || !id || running || !getPreferences().autoResync) return
-		const surface = doc.querySelector(mainSurface)
-		const run = duplicateIn(surface)
-		if (!run || (unresolved?.id === id && unresolved.text === run.text)) return
-		resync(false, id, surface)
+		// The buttons' re-read and the automatic check share one analysis of the primary chat.
+		const target = analysing(() => {
+			emit()
+			const id = activeId()
+			// A working session is judged once its turn ends, so it is not analysed meanwhile.
+			if (disposed || !id || running || busy(id) || !getPreferences().autoResync) return null
+			const surface = doc.querySelector(mainSurface)
+			const run = duplicateIn(surface)
+			return run && !(unresolved?.id === id && unresolved.text === run.text) ? { id, surface } : null
+		})
+		if (target) resync(false, target.id, target.surface)
 	}
 	function schedule(ms = settle) {
 		if (checkTimer !== null) win.clearTimeout(checkTimer)
@@ -694,8 +768,14 @@ export function installDuplicateResync({ doc = document, host, getPreferences = 
 			listeners.clear()
 			unlisten.forEach(stop => stop())
 			if (checkTimer !== null) win.clearTimeout(checkTimer)
-			timers.forEach(timer => win.clearTimeout(timer))
+			// Settle every pending wait: an in-flight resync then ends without dispatching or notifying.
+			for (const [timer, done] of timers) {
+				win.clearTimeout(timer)
+				done()
+			}
+			timers.clear()
 			waiters.forEach(resolve => resolve(null))
+			sockets.clear()
 			// Another wrapper may have been installed on top since; only restore our own.
 			if (originalSend && proto.send === capturingSend) proto.send = originalSend
 		}
@@ -737,7 +817,15 @@ function ResyncButton({ controller }) {
 	const ref = useRef(null)
 	const [view, setView] = useState({ running: false, busy: false, duplicates: false })
 	useEffect(() => {
-		const update = () => { if (ref.current) setView(controller.viewOf(ref.current)) }
+		let last = null
+		const update = () => {
+			if (!ref.current) return
+			const next = controller.viewOf(ref.current)
+			// Most notifications change nothing for this chat: skip the re-render.
+			if (last && last.running === next.running && last.busy === next.busy && last.duplicates === next.duplicates) return
+			last = next
+			setView(next)
+		}
 		update()
 		return controller.subscribe(update)
 	}, [controller])
@@ -799,10 +887,16 @@ export function installPromptTextDefaults(doc = document, getPreferences = () =>
 		return Boolean(section?.querySelector(queueHeaderSelector)) && getPreferences().expandQueuedPromptText
 	}
 
-	function queueTree(node) {
+	// Only enabled defaults are searched for; manual clicks are tracked with the full selector.
+	function discoverySelector() {
+		const { expandQueuedPromptText, expandHistoryPrompts } = getPreferences()
+		return [expandQueuedPromptText && queueTextSelector, expandHistoryPrompts && historyToggleSelector].filter(Boolean).join(', ')
+	}
+
+	function queueTree(node, query) {
 		if (node.nodeType !== 1 && node.nodeType !== 9) return
-		if (node.matches?.(selector)) candidates.add(node)
-		for (const button of node.querySelectorAll(selector)) candidates.add(button)
+		if (node.matches?.(query)) candidates.add(node)
+		for (const button of node.querySelectorAll(query)) candidates.add(button)
 	}
 
 	function flush() {
@@ -824,10 +918,15 @@ export function installPromptTextDefaults(doc = document, getPreferences = () =>
 	}
 
 	const observer = new win.MutationObserver(records => {
-		for (const record of records) {
-			if (record.target.matches?.(selector)) candidates.add(record.target)
-			if (record.attributeName === 'inert' || record.attributeName === 'aria-hidden') queueTree(record.target)
-			for (const node of record.addedNodes) queueTree(node)
+		const query = discoverySelector()
+		if (query) {
+			const roots = new Set()
+			for (const record of records) {
+				if (record.target.matches?.(query)) candidates.add(record.target)
+				if (record.attributeName === 'inert' || record.attributeName === 'aria-hidden') roots.add(record.target)
+				for (const node of record.addedNodes) roots.add(node)
+			}
+			for (const root of outermost(roots)) queueTree(root, query)
 		}
 		flush()
 	})
@@ -835,7 +934,8 @@ export function installPromptTextDefaults(doc = document, getPreferences = () =>
 	observer.observe(doc, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-expanded', 'inert', 'aria-hidden'] })
 	function refresh() {
 		style.textContent = getPreferences().expandHistoryPrompts ? historyPromptStyles : ''
-		queueTree(doc)
+		const query = discoverySelector()
+		if (query) queueTree(doc, query)
 		flush()
 	}
 	refresh()
@@ -850,6 +950,7 @@ export function installPromptTextDefaults(doc = document, getPreferences = () =>
 export function installStatusDefaults(doc = document, getPreferences = () => defaultPreferences, storage) {
 	const win = doc.defaultView
 	const selector = 'button[data-slot="status-drawer-toggle"][aria-expanded]'
+	const dockSelector = '[data-slot="composer-dock"]'
 	const nativeKey = 'hermes.desktop.collapsedStatusDrawers.v1'
 	const queueSelector = `[data-slot="composer-status-stack"] ${queueHeaderSelector}`
 	const saved = storage?.get('openStatusDrawers', [])
@@ -865,15 +966,12 @@ export function installStatusDefaults(doc = document, getPreferences = () => def
 	let frameId = null
 	let navigationFrame = null
 
-	function nativeDrawers() {
-		try {
-			const keys = JSON.parse(win.localStorage.getItem(nativeKey) || '[]')
-			return Array.isArray(keys) ? keys.filter(key => typeof key === 'string') : []
-		} catch { return [] }
-	}
+	const nativeDrawers = storageReader(win, nativeKey, '[]', keys => Array.isArray(keys) ? keys.filter(key => typeof key === 'string') : [])
 
 	function changedKey(before, after, opening) {
-		const keys = opening ? before.filter(key => !after.includes(key)) : after.filter(key => !before.includes(key))
+		const [from, to] = opening ? [before, after] : [after, before]
+		const kept = new Set(to)
+		const keys = from.filter(key => !kept.has(key))
 		return keys.length === 1 ? keys[0] : null
 	}
 
@@ -901,17 +999,30 @@ export function installStatusDefaults(doc = document, getPreferences = () => def
 		})
 	}
 
-	function queueOwner(node) {
-		const element = node.nodeType === 1 ? node : node.parentElement
-		const dock = element?.closest?.('[data-slot="composer-dock"]')
-		if (dock) for (const button of dock.querySelectorAll(selector)) candidates.add(button)
+	// With both defaults off nothing is searched for; manual opens are still recorded by the click listeners.
+	function discovering() {
+		const { foldStatusStack, expandQueuedPrompts } = getPreferences()
+		return foldStatusStack || expandQueuedPrompts
 	}
 
-	function queueTree(node) {
+	function queueOwner(node, docks) {
+		const element = node.nodeType === 1 ? node : node.parentElement
+		const dock = element?.closest?.(dockSelector)
+		if (dock) docks.add(dock)
+	}
+
+	function queueTree(node, docks) {
 		if (node.nodeType !== 1 && node.nodeType !== 9) return
-		queueOwner(node)
+		// Inside a composer, its dock's single search covers this subtree.
+		const dock = node.nodeType === 1 ? node.closest(dockSelector) : null
+		if (dock) { docks.add(dock); return }
 		if (node.matches?.(selector)) candidates.add(node)
 		for (const button of node.querySelectorAll(selector)) candidates.add(button)
+	}
+
+	// Each changed composer dock is searched once per mutation delivery, however many records it produced.
+	function queueDocks(docks) {
+		for (const dock of docks) for (const button of dock.querySelectorAll(selector)) candidates.add(button)
 	}
 
 	function queuedSection(button) {
@@ -976,7 +1087,17 @@ export function installStatusDefaults(doc = document, getPreferences = () => def
 		storage?.set('openStatusDrawers', [...openDrawers])
 	}
 
-	function refresh() { queueTree(doc); flush() }
+	function refresh() {
+		if (discovering()) {
+			const docks = new Set()
+			queueTree(doc, docks)
+			queueDocks(docks)
+		} else {
+			// Nothing is tracked while both are off: forget queue snapshots so that re-enabling treats current queues as changed.
+			queues = new WeakMap()
+		}
+		flush()
+	}
 	function navigate() {
 		if (navigationFrame !== null) return
 		navigationFrame = win.requestAnimationFrame(() => {
@@ -989,11 +1110,17 @@ export function installStatusDefaults(doc = document, getPreferences = () => def
 	}
 
 	const observer = new win.MutationObserver(records => {
-		for (const record of records) {
-			queueOwner(record.target)
-			if (record.target.matches?.(selector)) candidates.add(record.target)
-			if (record.attributeName === 'inert' || record.attributeName === 'aria-hidden') queueTree(record.target)
-			for (const node of record.addedNodes) queueTree(node)
+		if (discovering()) {
+			const docks = new Set()
+			const roots = new Set()
+			for (const record of records) {
+				queueOwner(record.target, docks)
+				if (record.target.matches?.(selector)) candidates.add(record.target)
+				if (record.attributeName === 'inert' || record.attributeName === 'aria-hidden') roots.add(record.target)
+				for (const node of record.addedNodes) roots.add(node)
+			}
+			for (const root of outermost(roots)) queueTree(root, docks)
+			queueDocks(docks)
 		}
 		flush()
 	})
