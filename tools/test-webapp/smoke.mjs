@@ -42,6 +42,18 @@ async function smoke(page, context, shot) {
 			return el && (el.clientHeight >= el.scrollHeight) === expected
 		}, expected)
 	}
+	// Clicking the sent prompt opens the native inline editor; the plugin only raises that editor's cap.
+	const editBoxTall = async expected => {
+		await historyExpanded(false)
+		await page.locator('[data-slot="aui_user-message-root"] button.composer-human-message').first().click()
+		const editor = page.locator('[data-slot="aui_edit-composer-root"] .ui-prompt-input-editor__input').first()
+		await editor.waitFor()
+		const { max, height, scroll, tall } = await editor.evaluate(el => ({ max: parseFloat(getComputedStyle(el).maxHeight), height: el.clientHeight, scroll: el.scrollHeight, tall: Math.min(36 * parseFloat(getComputedStyle(document.documentElement).fontSize), innerHeight * 0.7) }))
+		check(Math.abs(max - (expected ? tall : 192)) < 1, `The prompt edit box cap must be ${expected ? 'raised' : 'native'}: ${max}px`)
+		if (expected) check(height === scroll && height > 192, `The seeded prompt must fit the raised edit box: ${height}/${scroll}px`)
+		await page.keyboard.press('Escape')
+		await page.locator('[data-slot="aui_edit-composer-root"]').waitFor({ state: 'detached' })
+	}
 	const setQueue = async count => {
 		// Invented input through the real cross-window queue store, not replacement DOM/SDK or a model turn.
 		// Server-owned rows are excluded from both native auto-drainers; never submit these test prompts.
@@ -69,7 +81,7 @@ async function smoke(page, context, shot) {
 	}
 	try {
 		await page.evaluate(({ preferencesKey, disclosuresKey, hideDiffsKey, decisionsKey, drawersKey, opensKey, queueKey }) => {
-			localStorage.setItem(preferencesKey, JSON.stringify({ expandToolCalls: true, foldFileEdits: true, foldStatusStack: true, expandQueuedPrompts: true, expandQueuedPromptText: true, expandHistoryPrompts: true }))
+			localStorage.setItem(preferencesKey, JSON.stringify({ expandToolCalls: true, foldFileEdits: true, foldStatusStack: true, expandQueuedPrompts: true, expandQueuedPromptText: true, tallerPromptEditor: true }))
 			localStorage.removeItem(disclosuresKey)
 			localStorage.removeItem(drawersKey)
 			localStorage.removeItem(opensKey)
@@ -251,7 +263,7 @@ async function smoke(page, context, shot) {
 		const statusSwitch = page.getByRole('switch', { name: 'Status stack: fold by default', exact: true })
 		const queueSwitch = page.getByRole('switch', { name: 'Queued prompts: expand list by default', exact: true })
 		const queuedTextSwitch = page.getByRole('switch', { name: 'Queued prompts: expand long text by default', exact: true })
-		const historySwitch = page.getByRole('switch', { name: 'Long messages: expand by default', exact: true })
+		const historySwitch = page.getByRole('switch', { name: 'Long messages: taller edit box', exact: true })
 		await expandSwitch.waitFor()
 		for (const title of ['Tool calls', 'Composer', 'Conversation']) await page.getByRole('heading', { name: title, exact: true }).waitFor()
 		const previewRow = page.getByText('HTML previews: full width', { exact: true }).locator('xpath=ancestor::div[contains(@class, "@container")][1]')
@@ -285,14 +297,14 @@ async function smoke(page, context, shot) {
 		check(await statusSwitch.getAttribute('aria-checked') === 'false', 'Native SDK storage must persist the status-stack switch')
 		for (const control of [queuedTextSwitch, historySwitch]) check(await control.getAttribute('aria-checked') === 'false', 'Text switches must persist independently')
 		await route('/ui-tweaks-example-long-prompts')
-		await historyExpanded(false)
+		await editBoxTall(false)
 		await route('/ui-tweaks-example-preview')
 		await page.locator('iframe[src*="/assets/webapp-preview.html"]').waitFor({ state: 'attached' })
 		await setQueue(1)
 		await expanded(statusToggle(), true)
 		await expanded(queueToggle(), true)
 		await expanded(queuedTextToggle(), false)
-		report.checks.push('queue list expands with status folding disabled while long queued text and history remain independently collapsed')
+		report.checks.push('queue list expands with status folding disabled while long queued text stays collapsed and the prompt edit box keeps its native cap')
 		await route('/settings?tab=plugins&plugin=hermes-wide-previews%3Asettings')
 		await queueSwitch.waitFor()
 		await queueSwitch.click()
@@ -306,9 +318,8 @@ async function smoke(page, context, shot) {
 		await setQueue(0)
 		await expanded(statusToggle(), true)
 		await route('/ui-tweaks-example-long-prompts')
-		await historyExpanded(true)
-		check(await page.locator('[data-slot="aui_edit-composer-root"]').count() === 0, 'Expanding history must not open the native edit composer')
-		report.checks.push('long queued text does not open its closed list; long history expands without triggering editing')
+		await editBoxTall(true)
+		report.checks.push('long queued text does not open its closed list; the sent prompt stays folded and its edit box opens taller')
 		await route('/settings?tab=plugins&plugin=hermes-wide-previews%3Asettings')
 		await queueSwitch.waitFor()
 		await queueSwitch.click()

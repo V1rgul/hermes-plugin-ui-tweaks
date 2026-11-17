@@ -6,7 +6,7 @@ import { jsx, jsxs } from 'react/jsx-runtime'
 /** Customize chat presentation without changing preview documents or stored messages. */
 const ID = 'hermes-wide-previews'
 const NAME = 'Hermes UI Tweaks'
-const defaultPreferences = { expandToolCalls: true, treeToggle: true, foldFileEdits: true, tallerToolDetails: true, foldStatusStack: true, expandQueuedPrompts: true, expandQueuedPromptText: true, expandHistoryPrompts: true, autoResync: true }
+const defaultPreferences = { expandToolCalls: true, treeToggle: true, foldFileEdits: true, tallerToolDetails: true, foldStatusStack: true, expandQueuedPrompts: true, expandQueuedPromptText: true, tallerPromptEditor: true, autoResync: true }
 
 function readPreferences(storage) {
 	const saved = storage.get('preferences', {})
@@ -90,10 +90,10 @@ function SettingsPage({ getPreferences, updatePreference }) {
 				title: 'Conversation',
 				children: [
 					jsx(ToggleRow, {
-						label: 'Long messages: expand by default',
-						description: 'Show sent user prompts without the text clamp/fade. Editing and restore actions stay unchanged.',
-						checked: preferences.expandHistoryPrompts,
-						onChange: change('expandHistoryPrompts')
+						label: 'Long messages: taller edit box',
+						description: 'Sent prompts stay folded. Clicking one opens an edit box that shows up to three times more lines before scrolling, within the window height.',
+						checked: preferences.tallerPromptEditor,
+						onChange: change('tallerPromptEditor')
 					}),
 					jsx(ToggleRow, {
 						label: 'Duplicated messages: resync automatically',
@@ -856,23 +856,17 @@ function registerResyncButton(ctx, controller) {
 }
 
 const queueHeaderSelector = '[data-slot="status-section"] > .status-section-header > button[aria-expanded]:has(> .status-section-icon > :is(.codicon-layers, .codicon-debug-pause))'
-const historyToggleSelector = '[data-slot="aui_user-message-root"] :is(button[data-slot="aui_user-touch-expand"], button.composer-human-message[aria-expanded])'
 
-// Ordinary history bubbles edit on click, so lift their visual clamp without clicking them.
-// Spectator/touch bubbles have real expansion controls; leave their state to the controller below.
-export const historyPromptStyles = `
-[data-slot="aui_user-message-root"]:not(:has(button[data-slot="aui_user-touch-expand"], button.composer-human-message[aria-expanded])) .sticky-human-clamp {
-	max-height: none !important;
-	overflow: visible !important;
-	mask-image: none !important;
-	-webkit-mask-image: none !important;
+// Sent prompts keep their native four-line fold; clicking one opens the edit box, which native caps at 12rem, so reading or editing a long prompt means scrolling a small box. Triple the cap like opened tool details; max-height leaves short prompts at their natural height, and the viewport bound keeps the editor one scroller that fits on screen.
+export const promptEditorStyles = `
+[data-slot="aui_edit-composer-root"] .ui-prompt-input-editor__input.max-h-48 {
+	max-height: min(36rem, 70vh) !important;
 }
 `
 
 export function installPromptTextDefaults(doc = document, getPreferences = () => defaultPreferences) {
 	const win = doc.defaultView
-	const queueTextSelector = '[data-slot="status-row"] .status-row-actions button[aria-expanded]:has(.codicon-chevron-down)'
-	const selector = `${queueTextSelector}, ${historyToggleSelector}`
+	const selector = '[data-slot="status-row"] .status-row-actions button[aria-expanded]:has(.codicon-chevron-down)'
 	const initialized = new WeakSet()
 	const candidates = new Set()
 	const style = doc.createElement('style')
@@ -882,15 +876,13 @@ export function installPromptTextDefaults(doc = document, getPreferences = () =>
 	let disposed = false
 
 	function enabled(button) {
-		if (button.matches(historyToggleSelector)) return getPreferences().expandHistoryPrompts
 		const section = button.closest('[data-slot="status-section"]')
 		return Boolean(section?.querySelector(queueHeaderSelector)) && getPreferences().expandQueuedPromptText
 	}
 
-	// Only enabled defaults are searched for; manual clicks are tracked with the full selector.
+	// Only an enabled default is searched for; manual clicks are tracked regardless.
 	function discoverySelector() {
-		const { expandQueuedPromptText, expandHistoryPrompts } = getPreferences()
-		return [expandQueuedPromptText && queueTextSelector, expandHistoryPrompts && historyToggleSelector].filter(Boolean).join(', ')
+		return getPreferences().expandQueuedPromptText ? selector : ''
 	}
 
 	function queueTree(node, query) {
@@ -933,7 +925,7 @@ export function installPromptTextDefaults(doc = document, getPreferences = () =>
 	doc.addEventListener('click', onClick, true)
 	observer.observe(doc, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-expanded', 'inert', 'aria-hidden'] })
 	function refresh() {
-		style.textContent = getPreferences().expandHistoryPrompts ? historyPromptStyles : ''
+		style.textContent = getPreferences().tallerPromptEditor ? promptEditorStyles : ''
 		const query = discoverySelector()
 		if (query) queueTree(doc, query)
 		flush()
@@ -1152,7 +1144,7 @@ export default {
 	id: ID,
 	name: NAME,
 	description: 'Full-width previews, tool/edit defaults, independent queue, prompt-text, and status-stack preferences, and resync of duplicated chat messages.',
-	version: '0.9.0',
+	version: '0.10.0',
 	register(ctx) {
 		let preferences = readPreferences(ctx.storage)
 		const getPreferences = () => preferences

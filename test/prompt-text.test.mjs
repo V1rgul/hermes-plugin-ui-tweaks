@@ -7,17 +7,18 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const source = await readFile(process.env.PLUGIN_SOURCE || new URL('../plugin.js', import.meta.url), 'utf8')
 const preferencesKey = 'hermes.plugin.hermes-wide-previews.preferences'
 const queuedLabel = 'Queued prompts: expand long text by default'
-const historyLabel = 'Long messages: expand by default'
+const editorLabel = 'Long messages: taller edit box'
 let browser
 before(async () => { browser = await chromium.launch({ headless: true, ...(process.env.CHROMIUM_EXECUTABLE ? { executablePath: process.env.CHROMIUM_EXECUTABLE } : {}) }) })
 after(async () => { await browser?.close() })
 
-// Match the native history clamp and QueuePanel's per-entry expanded IDs. Native
+// Match the native history clamp, the edit box's max-h-48 cap and QueuePanel's per-entry expanded IDs. Native
 // expansion buttons commit asynchronously; ordinary history clicks start editing.
 function nativeFixture({ queueOpen = true } = {}) {
 	const text = Array.from({ length: 10 }, (_, i) => `Invented long prompt line ${i + 1}`).join('\n')
 	window.editClicks = 0
 	document.querySelector('#history-text').textContent = text
+	for (const editor of document.querySelectorAll('.ui-prompt-input-editor__input')) editor.textContent = Array.from({ length: 40 }, (_, i) => `Invented edited line ${i + 1}`).join('\n')
 	document.querySelector('#ordinary-history button').onclick = () => window.editClicks++
 	for (const id of ['spectator-history', 'touch-history']) {
 		const root = document.getElementById(id)
@@ -74,10 +75,13 @@ async function fixture(preferences = {}, options = {}) {
 		[data-body], #history-text { white-space: pre-wrap; }
 		.queue-clamped { max-height: 40px; overflow: hidden; white-space: pre-wrap; }
 		.queue-full { max-height: 160px; overflow-y: auto; white-space: pre-wrap; }
+		.max-h-48 { max-height: 192px; overflow-y: auto; white-space: pre-wrap; }
 	</style><main>
 		<div id="ordinary-history" data-slot="aui_user-message-root"><button type="button" class="composer-human-message"><div class="sticky-human-clamp" data-clamped="true"><span id="history-text" data-slot="aui_user-message-text"></span></div></button></div>
 		<div id="spectator-history" data-slot="aui_user-message-root"><button type="button" class="composer-human-message" aria-expanded="false"><div class="sticky-human-clamp" data-body>Read-only prompt\nMore text\nMore text</div></button></div>
 		<div id="touch-history" data-slot="aui_user-message-root"><div class="composer-human-message"><div class="sticky-human-clamp" data-body>Touch prompt\nMore text\nMore text</div></div><button type="button" data-slot="aui_user-touch-expand" aria-expanded="false">Expand</button></div>
+		<div data-slot="aui_user-message-root"><form data-slot="aui_edit-composer-root"><div id="edit-box" class="ui-prompt-input-editor__input max-h-48" contenteditable></div></form></div>
+		<div id="main-composer" class="ui-prompt-input-editor__input max-h-48" contenteditable></div>
 		<div data-slot="aui_assistant-message-content"><div class="sticky-human-clamp" id="outside">Not a user prompt\nMore text\nMore text</div></div>
 		<div data-slot="composer-status-stack"><div data-slot="status-section" id="queue"><div class="status-section-header"><button type="button" class="status-section-trigger" aria-expanded="false"><span class="status-section-icon"><i class="codicon codicon-layers"></i></span><span>1 en attente</span></button></div></div></div>
 	</main>` }))
@@ -87,7 +91,7 @@ async function fixture(preferences = {}, options = {}) {
 	return page
 }
 const queuedToggle = (page, id = 'first') => page.locator(`[data-entry="${id}"] button[aria-expanded]`)
-const historyClamp = page => page.locator('#ordinary-history .sticky-human-clamp')
+const editBoxHeight = (page, id = 'edit-box') => page.locator(`#${id}`).evaluate(el => el.clientHeight)
 async function expectExpanded(locator, expected) {
 	await locator.page().waitForFunction(({ selector, expected }) => document.querySelector(selector)?.getAttribute('aria-expanded') === String(expected), { selector: await locator.evaluate(el => {
 		el.dataset.promptTest = 'target'
@@ -101,18 +105,23 @@ async function fullHistory(page, expected) {
 		return (el.clientHeight >= el.scrollHeight) === expected
 	}, expected)
 }
-async function settings(page) { await page.evaluate(() => window.mountPluginSettings()); await page.getByRole('switch', { name: historyLabel }).waitFor() }
+// Only the edit box a sent prompt opens grows: 40 lines overflow the tripled cap, so it is bounded by 70% of the 720px viewport.
+async function expectTallEditBox(page, expected) {
+	await page.waitForFunction(expected => document.querySelector('#edit-box').clientHeight === (expected ? Math.round(innerHeight * 0.7) : 192), expected)
+}
+async function settings(page) { await page.evaluate(() => window.mountPluginSettings()); await page.getByRole('switch', { name: editorLabel }).waitFor() }
 async function settle(page) { await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))) }
 
-test('expands queued text and history without invoking edit actions or changing assistant content', async () => {
+test('expands queued text and the prompt edit box while sent prompts stay folded', async () => {
 	const page = await fixture()
 	try {
-		await fullHistory(page, false)
 		await activatePlugin(page, source)
-		await fullHistory(page, true)
 		await expectExpanded(queuedToggle(page), true)
-		for (const id of ['spectator-history', 'touch-history']) await expectExpanded(page.locator(`#${id} button[aria-expanded]`), true)
-		assert.equal(await historyClamp(page).evaluate(el => getComputedStyle(el).maskImage), 'none')
+		await expectTallEditBox(page, true)
+		await settle(page)
+		await fullHistory(page, false)
+		for (const id of ['spectator-history', 'touch-history']) assert.equal(await page.locator(`#${id} button[aria-expanded]`).getAttribute('aria-expanded'), 'false')
+		assert.equal(await editBoxHeight(page, 'main-composer'), 192, 'the main composer keeps its native cap')
 		assert.equal(await page.evaluate(() => window.editClicks), 0)
 		assert.equal(await page.locator('#outside').evaluate(el => getComputedStyle(el).maxHeight), '40px')
 		await page.locator('#ordinary-history button').click()
@@ -121,29 +130,22 @@ test('expands queued text and history without invoking edit actions or changing 
 })
 
 test('text switches work independently and live; manual native collapses survive subsequent refreshes', async () => {
-	const page = await fixture({ expandQueuedPromptText: false, expandHistoryPrompts: false, expandQueuedPrompts: false })
+	const page = await fixture({ expandQueuedPromptText: false, tallerPromptEditor: false, expandQueuedPrompts: false })
 	try {
 		await activatePlugin(page, source)
 		await settings(page)
-		await fullHistory(page, false)
+		await expectTallEditBox(page, false)
 		await expectExpanded(queuedToggle(page), false)
 		await page.getByRole('switch', { name: queuedLabel }).click()
 		await expectExpanded(queuedToggle(page), true)
-		await fullHistory(page, false)
+		await expectTallEditBox(page, false)
 		await queuedToggle(page).click()
 		await expectExpanded(queuedToggle(page), false)
-		await page.getByRole('switch', { name: historyLabel }).click()
-		await fullHistory(page, true)
+		await page.getByRole('switch', { name: editorLabel }).click()
+		await expectTallEditBox(page, true)
 		await expectExpanded(queuedToggle(page), false)
-		await page.getByRole('switch', { name: historyLabel }).click()
-		await fullHistory(page, false)
-		const spectator = page.locator('#spectator-history button[aria-expanded]')
-		await spectator.focus()
-		await page.keyboard.press('Space')
-		await expectExpanded(spectator, false)
-		await page.getByRole('switch', { name: historyLabel }).click()
-		await expectExpanded(spectator, false)
-		await fullHistory(page, true)
+		await page.getByRole('switch', { name: editorLabel }).click()
+		await expectTallEditBox(page, false)
 	} finally { await page.close() }
 })
 
@@ -163,25 +165,26 @@ test('queued-text default does not open its list, but handles late rows and reve
 	} finally { await page.close() }
 })
 
-test('text preferences persist across reloads and disposal restores the native history clamp', async () => {
+test('text preferences persist across reloads and disposal restores the native edit box cap', async () => {
 	const page = await fixture()
 	try {
 		await activatePlugin(page, source)
-		await fullHistory(page, true)
+		await expectTallEditBox(page, true)
 		await settings(page)
 		await page.getByRole('switch', { name: queuedLabel }).click()
-		await page.getByRole('switch', { name: historyLabel }).click()
-		await fullHistory(page, false)
+		await page.getByRole('switch', { name: editorLabel }).click()
+		await expectTallEditBox(page, false)
 		await page.reload()
 		await page.evaluate(nativeFixture, {})
 		await activatePlugin(page, source)
 		await settings(page)
-		for (const label of [queuedLabel, historyLabel]) assert.equal(await page.getByRole('switch', { name: label }).getAttribute('aria-checked'), 'false')
+		for (const label of [queuedLabel, editorLabel]) assert.equal(await page.getByRole('switch', { name: label }).getAttribute('aria-checked'), 'false')
+		await expectTallEditBox(page, false)
 		await expectExpanded(queuedToggle(page), false)
-		await page.getByRole('switch', { name: historyLabel }).click()
-		await fullHistory(page, true)
+		await page.getByRole('switch', { name: editorLabel }).click()
+		await expectTallEditBox(page, true)
 		await page.evaluate(() => window.disposePlugin())
-		await fullHistory(page, false)
+		await expectTallEditBox(page, false)
 		assert.equal(await page.locator('style[data-hermes-prompt-defaults]').count(), 0)
 		await page.evaluate(() => { window.queueEntries.push('after-dispose'); window.renderQueue() })
 		await settle(page)
@@ -212,8 +215,8 @@ test('a queue list opening with several prompts is searched once per delivery, a
 	} finally { await page.close() }
 })
 
-test('with both text defaults off, nothing is searched, and re-enabling expands untouched prompts only', async () => {
-	const page = await fixture({ expandQueuedPromptText: false, expandHistoryPrompts: false, expandQueuedPrompts: false })
+test('with the queued-text default off, nothing is searched, and re-enabling expands untouched prompts only', async () => {
+	const page = await fixture({ expandQueuedPromptText: false, expandQueuedPrompts: false })
 	try {
 		await page.evaluate(countSearches)
 		await activatePlugin(page, source)
@@ -226,7 +229,7 @@ test('with both text defaults off, nothing is searched, and re-enabling expands 
 		await page.evaluate(() => { window.queueEntries.push('late'); window.renderQueue() })
 		await settle(page)
 		const searches = await page.evaluate(() => window.searches('status-row-actions') + window.searches('aui_user-touch-expand'))
-		console.log(`prompt discovery searches with both defaults off: ${searches}`)
+		console.log(`prompt discovery searches with the queued-text default off: ${searches}`)
 		assert.equal(searches, 0)
 		await settings(page)
 		await page.getByRole('switch', { name: queuedLabel }).click()
