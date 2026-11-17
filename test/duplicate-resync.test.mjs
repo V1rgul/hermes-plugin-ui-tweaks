@@ -271,8 +271,16 @@ test('the composer broom turns orange on duplicates, sweeps while cleaning, and 
 		await page.evaluate(() => window.fakeHost.state.busyBySession.set({ 'runtime-1': true }))
 		await page.waitForFunction(() => document.querySelector('.hermes-ui-tweaks-resync').disabled)
 		assert.equal(await broom.getAttribute('data-duplicates'), null, 'a working chat is not flagged')
+		// Struck means the slash is drawn and the brush head is cut open where it crosses the slash, instead of the whole broom being drawn under it.
+		const struck = () => page.evaluate(() => {
+			const svg = document.querySelector('.hermes-ui-tweaks-resync svg')
+			const paths = [...svg.querySelectorAll('path')].map(path => path.getAttribute('d'))
+			return paths.includes('m2 2 20 20') && !paths.some(d => d.endsWith('z'))
+		})
+		assert.equal(await struck(), true, 'a disabled broom is struck through')
 		await page.evaluate(() => window.fakeHost.state.busyBySession.set({}))
 		await page.waitForFunction(() => !document.querySelector('.hermes-ui-tweaks-resync').disabled)
+		assert.equal(await struck(), false, 'an enabled broom is not struck through')
 		await broom.click()
 		await page.waitForFunction(() => document.querySelector('.hermes-ui-tweaks-resync').getAttribute('aria-busy') === 'true')
 		assert.match(await page.evaluate(() => getComputedStyle(document.querySelector('.hermes-ui-tweaks-resync svg')).animationName), /sweep/)

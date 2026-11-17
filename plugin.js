@@ -789,6 +789,13 @@ const broomPaths = [
 	'm5 18 2-2',
 	'm7.699 10.7 5.602 5.601'
 ]
+// The broom while it cannot be clicked, drawn as Lucide draws its "-off" icons (eye-off, mic-off, video-off): the paths themselves are cut, ending on the slash's centre line below it and 4 units from that line above it, which leaves the gap on the upper right side only. The band line runs parallel to the slash and would merge with it, so it is left out.
+const broomOffPaths = [
+	'M14.828 9.172 22 2',
+	'M9.595 9.595 2.502 13.727A1 1 0 002.3 15.3l6.403 6.403a1 1 0 001.571-.204L14.405 14.405',
+	'm5 18 2-2',
+	'm2 2 20 20'
+]
 const resyncClass = 'hermes-ui-tweaks-resync'
 
 // Orange while this chat shows duplicates; while cleaning, the broom sweeps from the end of its handle (top right).
@@ -845,7 +852,7 @@ function ResyncButton({ controller }) {
 		children: jsx('svg', {
 			'aria-hidden': 'true', width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor',
 			strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round',
-			children: broomPaths.map(d => jsx('path', { d }, d))
+			children: (view.busy ? broomOffPaths : broomPaths).map(d => jsx('path', { d }, d))
 		})
 	})
 }

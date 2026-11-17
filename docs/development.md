@@ -95,7 +95,7 @@ Desktop sometimes paints part of a conversation twice although the server holds 
 
 - When a turn ends, or after switching to a session, the plugin looks for a repeated run of assistant prose in the main chat. Tool rows, thinking blocks and short repeated wording are ignored.
 - If it finds one, it asks Desktop to rebuild that session from the server, as Desktop itself does after missing gateway events. No page reload, no request to the server; other tabs and the composer are untouched.
-- A broom button next to the model picker, in every composer including split tiles, does the same on demand. It turns orange when that chat shows duplicates, sweeps while cleaning, and is disabled while the session is working.
+- A broom button next to the model picker, in every composer including split tiles, does the same on demand. It turns orange when that chat shows duplicates, sweeps while cleaning, and is disabled and struck through while the session is working.
 - In a split tile, the button acts on the tile once it has focus (clicking in it is enough). Automatic resync covers the primary chat only.
 
 ## Implementation and compatibility
