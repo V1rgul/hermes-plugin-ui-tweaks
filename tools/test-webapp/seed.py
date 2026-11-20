@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+import wave
 from pathlib import Path
 
 sys.path.insert(0, "/opt/hermes")
@@ -29,7 +30,7 @@ if not (WORKSPACE / ".git").exists():
 <script>window.count = 0</script></div></body></html>''')
 
 db = SessionDB(HOME / "state.db")
-suffixes = ("tools", "preview", "long-prompts", "long-output", "first-blocks")
+suffixes = ("tools", "preview", "long-prompts", "long-output", "first-blocks", "wide-cards")
 for suffix in suffixes:
 	sid = f"ui-tweaks-example-{suffix}"
 	if db.get_session(sid) is not None:
@@ -70,6 +71,21 @@ for suffix in suffixes:
 		db.append_message(sid, "assistant", content=f'::preview{{file="{WORKSPACE}/preview.html"}}\n\nInvented text after the preview.')
 		db.append_message(sid, "user", content="Now display math first.")
 		db.append_message(sid, "assistant", content="$$\n\\sum_{n=1}^{100} n = 5050\n$$\n\nInvented text after the math.")
+		continue
+	if suffix == "wide-cards":
+		# Capped native cards: a one-second silent clip for the audio player, a full HTML document that becomes an artifact card, and a settled delegation.
+		with wave.open(str(WORKSPACE / "invented-clip.wav"), "wb") as clip:
+			clip.setnchannels(1)
+			clip.setsampwidth(2)
+			clip.setframerate(8000)
+			clip.writeframes(b"\0\0" * 8000)
+		page = "<!doctype html>\n<html><head><title>Invented artifact with a deliberately long title that a narrow card cuts</title></head>\n<body><h1>Invented artifact</h1><p>Seeded test document for the artifact card width check; not a live model turn.</p></body></html>"
+		goal = "Invented subagent goal long enough that a three-quarter-width card cuts it before the end of the line, renderer test only"
+		db.append_message(sid, "user", content="Show invented capped cards.")
+		db.append_message(sid, "assistant", content=f"Invented audio clip:\n\nMEDIA:{WORKSPACE}/invented-clip.wav\n\n```html\n{page}\n```")
+		db.append_message(sid, "assistant", content="", tool_calls=[{"id": "delegate-demo", "type": "function", "function": {"name": "delegate_task", "arguments": json.dumps({"goal": goal})}}])
+		db.append_message(sid, "tool", content=json.dumps({"results": [{"status": "completed", "summary": "Invented summary, no subagent ran.", "duration_seconds": 3}]}), tool_name="delegate_task", tool_call_id="delegate-demo")
+		db.append_message(sid, "assistant", content="Invented history for the card width check; no model was called.")
 		continue
 	if suffix == "preview":
 		db.append_message(sid, "user", content="Show the invented interactive preview.")

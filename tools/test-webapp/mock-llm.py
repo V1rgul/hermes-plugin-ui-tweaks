@@ -63,6 +63,13 @@ def plan(messages, tools):
 			(f'The background job reported back {tag}. I will read its output before summarising.', [call('terminal', {'command': 'echo checked-notification'})]),
 			(f'The background job finished cleanly {tag}; nothing else is pending.', []),
 		]
+	elif 'approval' in prompt:
+		# A recursive delete Hermes asks to approve; its target never exists, so even approving it changes nothing. The long command checks the approval card's width.
+		target = '/opt/data/workspace/ui-tweaks-demo/invented-approval-target-that-does-not-exist'
+		script = [
+			(f'This needs your approval {tag}.', [call('terminal', {'command': f'rm -rf {target}/first-invented-subdirectory {target}/second-invented-subdirectory {target}/third-invented-subdirectory'})]),
+			(f'Approval handled {tag}.', []),
+		]
 	elif 'parallel' in prompt:
 		script = [
 			(f'Running two inspections side by side {tag}.', [call('terminal', {'command': 'ls /opt/data | head -5'}), call('terminal', {'command': 'uname -a'})]),

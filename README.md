@@ -25,7 +25,7 @@ Open **Settings → Plugins → Hermes UI Tweaks**. All switches are enabled by 
 - **Long messages: taller edit box** — Sent prompts stay folded. Clicking one opens an edit box that shows up to three times more lines before scrolling, within the window height.
 - **Duplicated messages: resync automatically** — When a finished turn shows repeated blocks, rebuild the chat from the server. The broom next to the model picker does the same on demand and turns orange on duplicates.
 - **Timestamps: share existing lines** — With Hermes timestamps on, a text block’s time sits at the end of its first line and the message’s time in its action row, instead of each taking a line. A code block, table, preview or display math that opens a text block keeps the full width, with its time on the line above. **Always on.**
-- **HTML previews: full width** — Use the full available message width without changing preview content or state. **Always on.**
+- **Previews and cards: full width** — HTML previews, audio players, approval and subagent cards, artifact cards and MCP launch commands use the full message width, so seek bars are finer and long titles, goals and commands are cut or wrapped less. Preview content and state are unchanged. Images and videos keep their caps: they keep their ratio, so width would cost height. **On by default.**
 
 ## Installation or update
 

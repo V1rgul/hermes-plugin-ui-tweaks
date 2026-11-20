@@ -6,7 +6,7 @@ import { jsx, jsxs } from 'react/jsx-runtime'
 /** Customize chat presentation without changing preview documents or stored messages. */
 const ID = 'hermes-wide-previews'
 const NAME = 'Hermes UI Tweaks'
-const defaultPreferences = { expandToolCalls: true, treeToggle: true, foldFileEdits: true, tallerToolDetails: true, foldStatusStack: true, expandQueuedPrompts: true, expandQueuedPromptText: true, tallerPromptEditor: true, autoResync: true }
+const defaultPreferences = { expandToolCalls: true, treeToggle: true, foldFileEdits: true, tallerToolDetails: true, foldStatusStack: true, expandQueuedPrompts: true, expandQueuedPromptText: true, tallerPromptEditor: true, autoResync: true, fullWidth: true }
 
 function readPreferences(storage) {
 	const saved = storage.get('preferences', {})
@@ -106,10 +106,11 @@ function SettingsPage({ getPreferences, updatePreference }) {
 						description: 'With Hermes timestamps on, a text block’s time sits at the end of its first line and the message’s time in its action row, instead of each taking a line.',
 						action: jsx('span', { className: 'text-sm text-(--ui-text-secondary)', children: 'Always on' })
 					}),
-					jsx(ListRow, {
-						title: 'HTML previews: full width',
-						description: 'Use the full available message width without changing preview content or state.',
-						action: jsx('span', { className: 'text-sm text-(--ui-text-secondary)', children: 'Always on' })
+					jsx(ToggleRow, {
+						label: 'Previews and cards: full width',
+						description: 'HTML previews, audio players, approval and subagent cards, artifact cards and MCP launch commands use the full message width. Preview content and state are unchanged.',
+						checked: preferences.fullWidth,
+						onChange: change('fullWidth')
 					})
 				]
 			}),
@@ -133,6 +134,19 @@ ${scope} span:has(> ${frame}) {
 	max-width: none !important;
 	min-width: 0 !important;
 	box-sizing: border-box;
+}
+`
+
+// Native caps that only cut or wrap content: an audio player's seek bar (28rem), the approval card's command (36rem, rendered after the messages), a subagent's one-line goal and activity (75%), an artifact's one-line title (28rem), and an MCP setup card's launch command (32rem). The MCP card shares its markup with connector cards, so only one showing its launch command widens. Images and videos stay capped: they keep their ratio, so width would cost height, and images already open in a full-window viewer.
+export const wideCardStyles = `
+${scope} .aui-md span:has(> audio),
+[data-slot="tool-approval-stack"],
+${scope} [data-slot="aui_artifact-card"],
+${scope} [data-connector-offer]:has([data-slot="mcp-launch-target"]) {
+	max-width: none !important;
+}
+${scope} [data-slot="tool-block"][data-delegate-card] {
+	max-width: 100% !important;
 }
 `
 
@@ -364,7 +378,7 @@ ${toolDetail} :is([data-slot="file-diff-panel"], [data-slot="diff-lines"]) {
 export function installWidePreviews(doc = document, getPreferences = () => defaultPreferences) {
 	const style = doc.createElement('style')
 	style.dataset.hermesPlugin = ID
-	const refresh = () => { style.textContent = previewStyles + toolLayoutStyles + timestampStyles + (getPreferences().tallerToolDetails ? toolDetailStyles : '') + resyncStyles }
+	const refresh = () => { style.textContent = (getPreferences().fullWidth ? previewStyles + wideCardStyles : '') + toolLayoutStyles + timestampStyles + (getPreferences().tallerToolDetails ? toolDetailStyles : '') + resyncStyles }
 	refresh()
 	doc.head.append(style)
 	return { refresh, dispose: () => style.remove() }
@@ -1157,7 +1171,7 @@ export default {
 	id: ID,
 	name: NAME,
 	description: 'Full-width previews, tool/edit defaults, independent queue, prompt-text, and status-stack preferences, and resync of duplicated chat messages.',
-	version: '0.10.0',
+	version: '0.11.0',
 	register(ctx) {
 		let preferences = readPreferences(ctx.storage)
 		const getPreferences = () => preferences

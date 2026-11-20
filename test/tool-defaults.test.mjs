@@ -296,7 +296,7 @@ async function expectChecked(page, label, checked) {
 	await page.waitForFunction(({ label, checked }) => Array.from(document.querySelectorAll('[role="switch"]')).find(el => el.getAttribute('aria-label') === label)?.getAttribute('aria-checked') === String(checked), { label, checked }, { timeout: 3000 })
 }
 
-test('settings group controls and show full-width previews as a noninteractive feature', async () => {
+test('settings group controls and show always-on features without a switch', async () => {
 	const page = await fixture([{ id: 'run', rows: [ordinary, edit] }])
 	try {
 		await activate(page)
@@ -305,11 +305,12 @@ test('settings group controls and show full-width previews as a noninteractive f
 		assert.equal(await settings.getByRole('region', { name: 'Tool calls', exact: true }).getByRole('switch', { name: expandLabel, exact: true }).count(), 1)
 		assert.equal(await settings.getByRole('region', { name: 'Composer', exact: true }).getByRole('switch', { name: 'Status stack: fold by default', exact: true }).count(), 1)
 		const conversation = settings.getByRole('region', { name: 'Conversation', exact: true })
-		const previewRow = conversation.getByText('HTML previews: full width', { exact: true }).locator('..')
-		assert.equal(await previewRow.getByText('Always on', { exact: true }).count(), 1)
-		assert.equal(await previewRow.locator('button, input, [role="switch"]').count(), 0)
+		const timestampRow = conversation.getByText('Timestamps: share existing lines', { exact: true }).locator('..')
+		assert.equal(await timestampRow.getByText('Always on', { exact: true }).count(), 1)
+		assert.equal(await timestampRow.locator('button, input, [role="switch"]').count(), 0)
+		assert.equal(await conversation.getByRole('switch', { name: 'Previews and cards: full width', exact: true }).count(), 1)
 		assert.equal(await conversation.getByRole('switch', { name: 'Duplicated messages: resync automatically', exact: true }).count(), 1)
-		assert.equal(await settings.getByRole('switch').count(), 9)
+		assert.equal(await settings.getByRole('switch').count(), 10)
 	} finally { await page.close() }
 })
 

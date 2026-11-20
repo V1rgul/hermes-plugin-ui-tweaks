@@ -279,10 +279,10 @@ async function smoke(page, context, shot) {
 		const historySwitch = page.getByRole('switch', { name: 'Long messages: taller edit box', exact: true })
 		await expandSwitch.waitFor()
 		for (const title of ['Tool calls', 'Composer', 'Conversation']) await page.getByRole('heading', { name: title, exact: true }).waitFor()
-		const previewRow = page.getByText('HTML previews: full width', { exact: true }).locator('xpath=ancestor::div[contains(@class, "@container")][1]')
-		check(await previewRow.getByText('Always on', { exact: true }).count() === 1, 'Full-width previews must be visible as an always-on feature')
-		check(await previewRow.locator('button, input, [role="switch"]').count() === 0, 'The always-on feature must not have a toggle, including a disabled one')
-		report.checks.push('categorized settings and a native full-width preview row without a switch')
+		const timestampRow = page.getByText('Timestamps: share existing lines', { exact: true }).locator('xpath=ancestor::div[contains(@class, "@container")][1]')
+		check(await timestampRow.getByText('Always on', { exact: true }).count() === 1, 'Timestamp placement must be visible as an always-on feature')
+		check(await timestampRow.locator('button, input, [role="switch"]').count() === 0, 'The always-on feature must not have a toggle, including a disabled one')
+		report.checks.push('categorized settings and a native always-on row without a switch')
 		const treeSwitch = page.getByRole('switch', { name: 'Lists: tree toggle instead of summary line', exact: true })
 		const treeStyled = () => page.evaluate(() => Boolean(document.querySelector('style[data-hermes-tree-toggle]')?.textContent))
 		check(await treeSwitch.getAttribute('aria-checked') === 'true' && await treeStyled(), 'The tree toggle must be on by default')
@@ -368,6 +368,27 @@ async function smoke(page, context, shot) {
 		report.checks.push('native preview fills its message at wide/narrow sizes without losing interaction state')
 		await page.setViewportSize({ width: 1440, height: 900 })
 		report.previewScreenshot = await shot('integration-preview')
+		const cards = async () => {
+			await route('/ui-tweaks-example-wide-cards')
+			await page.getByText('Invented history for the card width check', { exact: false }).waitFor()
+			await page.locator('[data-slot="aui_artifact-card"]').waitFor()
+			return page.evaluate(() => {
+				const width = selector => document.querySelector(selector).getBoundingClientRect().width
+				return { available: width('[data-slot="aui_assistant-message-content"] .aui-md'), audio: width('.aui-md span:has(> audio)'), artifact: width('[data-slot="aui_artifact-card"]'), delegate: width('[data-delegate-card]') }
+			})
+		}
+		report.cards = await cards()
+		for (const name of ['audio', 'artifact', 'delegate']) check(Math.abs(report.cards[name] - report.cards.available) < 1, `The ${name} card must fill the message width: ${JSON.stringify(report.cards)}`)
+		report.checks.push('audio player, artifact card and subagent card fill the message width')
+		report.cardsScreenshot = await shot('integration-wide-cards')
+		await route('/settings?tab=plugins&plugin=hermes-wide-previews%3Asettings')
+		const widthSwitch = page.getByRole('switch', { name: 'Previews and cards: full width', exact: true })
+		await widthSwitch.waitFor()
+		check(await widthSwitch.getAttribute('aria-checked') === 'true', 'Full width must be on by default')
+		await widthSwitch.click()
+		report.nativeCards = await cards()
+		for (const name of ['audio', 'artifact', 'delegate']) check(report.nativeCards[name] < report.nativeCards.available - 1, `Switching off must restore the native ${name} cap: ${JSON.stringify(report.nativeCards)}`)
+		report.checks.push('the full-width switch restores native card widths live')
 		check(errors.length === 0, `Uncaught renderer errors: ${errors.join('; ')}`)
 		report.checks.push('no uncaught renderer errors')
 		return report
