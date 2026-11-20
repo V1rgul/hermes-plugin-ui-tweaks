@@ -38,10 +38,15 @@ function fixtureHtml(stamps) {
 	/* Native action bars are a positioned full-width row that would paint over an overlapping time. */
 	.bar { position: relative; display: flex; width: 100%; justify-content: flex-end; }
 	.diff { height: 40px; }
+	/* A code card's overflow starts a formatting context; a preview wrapper is a plain full-width block. */
+	.card { overflow: hidden; height: 40px; }
+	.wide { display: block; width: 100%; height: 40px; }
+	p { margin: 0; }
 </style></head><body>
 	${message('after-tools', `<div data-slot="tool-block" data-tool-group data-conversation-scaffold><div data-tool-summary data-conversation-scaffold>${disclosure('Ran 2 commands')}</div></div><div data-slot="tool-block" data-tool-row data-conversation-scaffold><div>${disclosure('Read example.txt', { action: true })}</div></div>${prose('long', long)}${prose('next', 'A second, short paragraph.')}`)}
 	${message('after-edit', `<div data-slot="tool-block" data-tool-row data-file-edit data-conversation-scaffold><div>${disclosure('example.txt')}</div><div class="diff"></div></div>${prose('edited', 'Prose after an opened diff.')}`)}
 	${message('first', prose('opening', 'Prose that opens its message.'))}
+	${message('blocks', `${stamp('10:00:01.000', 'prose')}<div class="aui-md" id="code-first"><div><div data-slot="code-card" class="card">code</div></div><div><p>Text after the code.</p></div></div>${stamp('10:00:01.000', 'prose')}<div class="aui-md" id="preview-first"><div><span class="wide">preview</span></div></div>${stamp('10:00:01.000', 'prose')}<div class="aui-md" id="paragraph-first"><div><p>${long}</p></div></div>`)}
 </body></html>`
 }
 
@@ -128,6 +133,29 @@ test('the message time moves into the action row, and fold summaries put theirs 
 			assert.equal((await layout(unpatched)).call.dismiss, withStamps.call.dismiss, 'a call’s dismiss action must keep its native place')
 		} finally { await unpatched.close() }
 	} finally { await plain.close(); await stamped.close() }
+})
+
+test('a block that opens a text block keeps the full width below the time', async () => {
+	const page = await fixture(true)
+	try {
+		const geometry = await page.evaluate(() => {
+			const rect = el => el.getBoundingClientRect()
+			const content = rect(document.querySelector('#blocks [data-slot="aui_assistant-message-content"]'))
+			return Object.fromEntries([['code-first', '.card'], ['preview-first', '.wide'], ['paragraph-first', 'p']].map(([id, block]) => {
+				const md = document.querySelector(`#${id}`)
+				const range = document.createRange()
+				range.selectNodeContents(md.querySelector('p') || md)
+				return [id, { stamp: rect(md.previousElementSibling), block: rect(md.querySelector(block)), firstLine: range.getClientRects()[0], contentWidth: content.width }]
+			}))
+		})
+		for (const id of ['code-first', 'preview-first']) {
+			const { stamp, block, contentWidth } = geometry[id]
+			assert.equal(block.width, contentWidth, `${id}: the block must not shrink beside the time`)
+			assert.ok(block.top >= stamp.bottom, `${id}: the block must not run under the time`)
+		}
+		const { stamp, firstLine } = geometry['paragraph-first']
+		assert.ok(firstLine.right <= stamp.left && Math.abs((firstLine.top + firstLine.bottom) / 2 - (stamp.top + stamp.bottom) / 2) < 1, 'running text still shares its first line with the time')
+	} finally { await page.close() }
 })
 
 test('disabling the plugin gives timestamps their own lines back', async () => {

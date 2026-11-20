@@ -175,6 +175,19 @@ async function smoke(page, context, shot) {
 		check(Math.abs(times.callTimeRight - times.right) < 1, 'Prose and call times must share one end column')
 		report.checks.push('prose and message times share existing lines, in the tool rows’ end column')
 		report.treeScreenshot = await shot('integration-tool-tree')
+		await route('/ui-tweaks-example-first-blocks')
+		await page.getByText('Invented text after the math.').waitFor()
+		await page.locator('[data-slot="aui_assistant-message-content"] iframe').first().waitFor()
+		report.firstBlocks = await page.evaluate(() => Array.from(document.querySelectorAll('[data-slot="aui_assistant-message-content"] > [data-slot="timeline-timestamp"] + .aui-md'), md => {
+			const block = md.firstElementChild.firstElementChild
+			const at = block.getBoundingClientRect()
+			return { block: block.dataset.slot || block.tagName, width: at.width, contentWidth: md.getBoundingClientRect().width, top: at.top, stampBottom: md.previousElementSibling.getBoundingClientRect().bottom }
+		}))
+		check(report.firstBlocks.length === 5, `The seeded opening blocks must render: ${JSON.stringify(report.firstBlocks)}`)
+		for (const box of report.firstBlocks.filter(box => box.block !== 'BLOCKQUOTE')) check(Math.abs(box.width - box.contentWidth) < 1 && box.top >= box.stampBottom - 0.5, `A code card, table, preview or display math opening a text block must keep the full width below the time: ${JSON.stringify(box)}`)
+		report.checks.push('code cards, tables, previews and display math that open a text block keep the full width')
+		report.firstBlocksScreenshot = await shot('integration-first-blocks')
+		await route('/ui-tweaks-example-tools')
 		await editToggle().click()
 		await page.locator('[data-tool-row] [data-slot="file-diff-panel"]').waitFor()
 		check((await page.locator('[data-tool-row] [data-slot="file-diff-panel"]').innerText()).includes('After the invented edit.'), 'Native diff contents must reopen')

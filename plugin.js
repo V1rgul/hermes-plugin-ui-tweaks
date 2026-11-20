@@ -213,8 +213,10 @@ ${scope} > :is([data-tool-row], [data-tool-group]):has(+ :is([data-tool-row], [d
 
 // With Hermes `display.timestamps`, a prose block's time takes its own line above the text, the message's time a line below it, and a fold summary's time hugs its label. Tool rows already show theirs at the end of their line: put the others in that column instead of spending lines on them.
 // The prose time floats into the text's first line; `overflow: clip` keeps the text's clipping without the formatting context `hidden` starts, so only that line makes room. The time no longer separates the text from the block before it, so the text takes the native block gap back as a collapsing margin. A float sits below the previous block's own margin rather than the collapsed one, so it carries the gap itself, except after an opened diff whose margin already is that gap.
+// Only running text can share its first line with the time. A code card or table wrapper starts a formatting context and would shrink as a whole beside the float, and a preview or display math would run under it, so any other opening block clears the time and keeps the full width (the native layout, time on its own line).
 const stamp = '[data-slot="timeline-timestamp"]'
 const scaffoldBlock = ':is([data-slot="tool-block"], [data-slot="aui_thinking-disclosure"], [data-slot="aui_turn-activity"])'
+const flowText = ':is(p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote)'
 export const timestampStyles = `
 ${scope} > ${stamp}:has(+ .aui-md) {
 	float: inline-end;
@@ -225,6 +227,10 @@ ${scope} > ${stamp}:has(+ .aui-md) {
 ${scope} > ${stamp} + .aui-md {
 	overflow: clip;
 	margin-block-start: 0 !important;
+}
+${scope} > ${stamp} + .aui-md > :first-child:not(div, ${flowText}),
+${scope} > ${stamp} + .aui-md > div:first-child > :first-child:not(${flowText}) {
+	clear: inline-end;
 }
 ${scope} > ${scaffoldBlock} + ${stamp}:has(+ .aui-md) {
 	margin-block-start: var(--turn-block-gap);

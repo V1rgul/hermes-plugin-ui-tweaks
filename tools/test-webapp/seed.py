@@ -29,7 +29,8 @@ if not (WORKSPACE / ".git").exists():
 <script>window.count = 0</script></div></body></html>''')
 
 db = SessionDB(HOME / "state.db")
-for suffix in ("tools", "preview", "long-prompts", "long-output"):
+suffixes = ("tools", "preview", "long-prompts", "long-output", "first-blocks")
+for suffix in suffixes:
 	sid = f"ui-tweaks-example-{suffix}"
 	if db.get_session(sid) is not None:
 		continue
@@ -56,6 +57,20 @@ for suffix in ("tools", "preview", "long-prompts", "long-output"):
 			db.append_message(sid, "tool", content=json.dumps(result), tool_name=name, tool_call_id=ident)
 		db.append_message(sid, "assistant", content="Invented history for the tool detail height check; no command ran.")
 		continue
+	if suffix == "first-blocks":
+		# Blocks that open a text block sit beside its floated timestamp; each must still span the message width.
+		long = "Invented wide line that runs past the reading column to check the block width. " * 3
+		db.append_message(sid, "user", content="Show invented blocks that open a text block.")
+		db.append_message(sid, "assistant", content=f"```text\nHello,\n\n{long}\n```\n\nInvented text after the code block.")
+		db.append_message(sid, "user", content="Now a table first.")
+		db.append_message(sid, "assistant", content="| Invented column | Another invented column |\n| --- | --- |\n| A | B |\n\nInvented text after the table.")
+		db.append_message(sid, "user", content="Now a quote first.")
+		db.append_message(sid, "assistant", content=f"> {long}\n\nInvented text after the quote.")
+		db.append_message(sid, "user", content="Now a preview first.")
+		db.append_message(sid, "assistant", content=f'::preview{{file="{WORKSPACE}/preview.html"}}\n\nInvented text after the preview.')
+		db.append_message(sid, "user", content="Now display math first.")
+		db.append_message(sid, "assistant", content="$$\n\\sum_{n=1}^{100} n = 5050\n$$\n\nInvented text after the math.")
+		continue
 	if suffix == "preview":
 		db.append_message(sid, "user", content="Show the invented interactive preview.")
 		db.append_message(sid, "assistant", content=f'This is a seeded test document, not a live model turn.\n\n::preview{{file="{WORKSPACE}/preview.html"}}')
@@ -71,4 +86,4 @@ for suffix in ("tools", "preview", "long-prompts", "long-output"):
 		db.append_message(sid, "tool", content=json.dumps(result), tool_name=name, tool_call_id=ident)
 	db.append_message(sid, "assistant", content="Invented history for testing only. Expand this group and reopen the example.txt diff using the native controls.")
 db.close()
-print(json.dumps({"sessions": [f"ui-tweaks-example-{suffix}" for suffix in ("tools", "preview", "long-prompts", "long-output")], "workspace": str(WORKSPACE), "invented": True}))
+print(json.dumps({"sessions": [f"ui-tweaks-example-{suffix}" for suffix in suffixes], "workspace": str(WORKSPACE), "invented": True}))
