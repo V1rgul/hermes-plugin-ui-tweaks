@@ -230,6 +230,33 @@ async function smoke(page, context, shot) {
 		await tallerSwitch.click()
 		check(await tallerSwitch.getAttribute('aria-checked') === 'true', 'Taller boxes must switch back on')
 		report.checks.push('one native switch restores and reapplies both output and diff heights without reloading')
+
+		const codeBlock = async () => {
+			await route('/ui-tweaks-example-long-code')
+			await page.getByText('Invented history for the code block height check', { exact: false }).waitFor()
+			const toggle = page.locator('.aui-md [data-slot="code-card"] button[aria-expanded]').first()
+			if (await toggle.getAttribute('aria-expanded') === 'false') await toggle.click()
+			await expanded(toggle, true)
+			return toggle.evaluate(button => {
+				const fade = button.parentElement
+				const scroller = fade.parentElement.firstElementChild
+				return { height: scroller.getBoundingClientRect().height, scrolls: scroller.scrollHeight > scroller.clientHeight, fade: getComputedStyle(fade).backgroundImage !== 'none', native: innerHeight * 0.4, cap: Math.min(42 * parseFloat(getComputedStyle(document.documentElement).fontSize), innerHeight * 0.7) }
+			})
+		}
+		report.codeBlock = await codeBlock()
+		check(Math.abs(report.codeBlock.height - report.codeBlock.cap) < 1 && report.codeBlock.scrolls && !report.codeBlock.fade, `An expanded long code block must fill the raised cap, still scroll and drop its fade: ${JSON.stringify(report.codeBlock)}`)
+		report.codeBlockScreenshot = await shot('integration-code-block')
+		await route('/settings?tab=plugins&plugin=hermes-wide-previews%3Asettings')
+		const codeSwitch = page.getByRole('switch', { name: 'Code blocks: taller when expanded', exact: true })
+		await codeSwitch.waitFor()
+		check(await codeSwitch.getAttribute('aria-checked') === 'true', 'Taller code blocks must be on by default')
+		await codeSwitch.click()
+		report.nativeCodeBlock = await codeBlock()
+		check(Math.abs(report.nativeCodeBlock.height - report.nativeCodeBlock.native) < 1 && report.nativeCodeBlock.fade, `Switching off must restore the native expanded cap and fade: ${JSON.stringify(report.nativeCodeBlock)}`)
+		await route('/settings?tab=plugins&plugin=hermes-wide-previews%3Asettings')
+		await codeSwitch.click()
+		check(await codeSwitch.getAttribute('aria-checked') === 'true', 'Taller code blocks must switch back on')
+		report.checks.push('an expanded native code block uses the raised cap without its fade, and its switch restores the native cap live')
 		await route('/ui-tweaks-example-tools')
 		await page.getByText('Invented history for testing only.', { exact: false }).waitFor()
 

@@ -310,7 +310,8 @@ test('settings group controls and show always-on features without a switch', asy
 		assert.equal(await timestampRow.locator('button, input, [role="switch"]').count(), 0)
 		assert.equal(await conversation.getByRole('switch', { name: 'Previews and cards: full width', exact: true }).count(), 1)
 		assert.equal(await conversation.getByRole('switch', { name: 'Duplicated messages: resync automatically', exact: true }).count(), 1)
-		assert.equal(await settings.getByRole('switch').count(), 10)
+		assert.equal(await conversation.getByRole('switch', { name: 'Code blocks: taller when expanded', exact: true }).count(), 1)
+		assert.equal(await settings.getByRole('switch').count(), 11)
 	} finally { await page.close() }
 })
 

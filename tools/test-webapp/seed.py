@@ -30,7 +30,7 @@ if not (WORKSPACE / ".git").exists():
 <script>window.count = 0</script></div></body></html>''')
 
 db = SessionDB(HOME / "state.db")
-suffixes = ("tools", "preview", "long-prompts", "long-output", "first-blocks", "wide-cards")
+suffixes = ("tools", "preview", "long-prompts", "long-output", "first-blocks", "wide-cards", "long-code")
 for suffix in suffixes:
 	sid = f"ui-tweaks-example-{suffix}"
 	if db.get_session(sid) is not None:
@@ -86,6 +86,13 @@ for suffix in suffixes:
 		db.append_message(sid, "assistant", content="", tool_calls=[{"id": "delegate-demo", "type": "function", "function": {"name": "delegate_task", "arguments": json.dumps({"goal": goal})}}])
 		db.append_message(sid, "tool", content=json.dumps({"results": [{"status": "completed", "summary": "Invented summary, no subagent ran.", "duration_seconds": 3}]}), tool_name="delegate_task", tool_call_id="delegate-demo")
 		db.append_message(sid, "assistant", content="Invented history for the card width check; no model was called.")
+		continue
+	if suffix == "long-code":
+		# Long enough to overflow both the native expanded cap (40% of the window) and the raised one, yet under the 48 lines that turn a code fence into an artifact card.
+		# Code-like lines in a named language: Desktop renders a fence that looks like prose as plain text, without the expandable card.
+		code = "\n".join(f"invented_{index} = 'code line {index}'" for index in range(1, 46))
+		db.append_message(sid, "user", content="Show a long invented code block.")
+		db.append_message(sid, "assistant", content=f"Invented history for the code block height check; no model was called.\n\n```python\n{code}\n```")
 		continue
 	if suffix == "preview":
 		db.append_message(sid, "user", content="Show the invented interactive preview.")

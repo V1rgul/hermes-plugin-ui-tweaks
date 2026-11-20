@@ -6,7 +6,7 @@ import { jsx, jsxs } from 'react/jsx-runtime'
 /** Customize chat presentation without changing preview documents or stored messages. */
 const ID = 'hermes-wide-previews'
 const NAME = 'Hermes UI Tweaks'
-const defaultPreferences = { expandToolCalls: true, treeToggle: true, foldFileEdits: true, tallerToolDetails: true, foldStatusStack: true, expandQueuedPrompts: true, expandQueuedPromptText: true, tallerPromptEditor: true, autoResync: true, fullWidth: true }
+const defaultPreferences = { expandToolCalls: true, treeToggle: true, foldFileEdits: true, tallerToolDetails: true, foldStatusStack: true, expandQueuedPrompts: true, expandQueuedPromptText: true, tallerPromptEditor: true, tallerCodeBlocks: true, autoResync: true, fullWidth: true }
 
 function readPreferences(storage) {
 	const saved = storage.get('preferences', {})
@@ -94,6 +94,12 @@ function SettingsPage({ getPreferences, updatePreference }) {
 						description: 'Sent prompts stay folded. Clicking one opens an edit box that shows up to three times more lines before scrolling, within the window height.',
 						checked: preferences.tallerPromptEditor,
 						onChange: change('tallerPromptEditor')
+					}),
+					jsx(ToggleRow, {
+						label: 'Code blocks: taller when expanded',
+						description: 'An expanded code block shows up to 42rem before scrolling, within 70% of the window height instead of 40%, and drops the fade over its last line. Folded blocks keep their size.',
+						checked: preferences.tallerCodeBlocks,
+						onChange: change('tallerCodeBlocks')
 					}),
 					jsx(ToggleRow, {
 						label: 'Duplicated messages: resync automatically',
@@ -375,10 +381,21 @@ ${toolDetail} :is([data-slot="file-diff-panel"], [data-slot="diff-lines"]) {
 }
 `
 
+// Fenced code and oversized text expand from a 7.5rem fold to only 40dvh, so a long block still means scrolling a box under half the window, and the fold's bottom fade stays drawn over the last visible line. Raise the expanded cap like the opened tool details; the native class exists only while expanded, so folded blocks keep their fold. The fade is only an overflow cue for the folded state: once expanded, the scrollbar already says there is more.
+const expandedBlock = `${scope} .aui-md .max-h-\\[40dvh\\]`
+export const codeBlockStyles = `
+${expandedBlock} {
+	max-height: min(42rem, 70vh) !important;
+}
+${expandedBlock} ~ div:has(> button[aria-expanded="true"]) {
+	background-image: none !important;
+}
+`
+
 export function installWidePreviews(doc = document, getPreferences = () => defaultPreferences) {
 	const style = doc.createElement('style')
 	style.dataset.hermesPlugin = ID
-	const refresh = () => { style.textContent = (getPreferences().fullWidth ? previewStyles + wideCardStyles : '') + toolLayoutStyles + timestampStyles + (getPreferences().tallerToolDetails ? toolDetailStyles : '') + resyncStyles }
+	const refresh = () => { style.textContent = (getPreferences().fullWidth ? previewStyles + wideCardStyles : '') + toolLayoutStyles + timestampStyles + (getPreferences().tallerToolDetails ? toolDetailStyles : '') + (getPreferences().tallerCodeBlocks ? codeBlockStyles : '') + resyncStyles }
 	refresh()
 	doc.head.append(style)
 	return { refresh, dispose: () => style.remove() }
