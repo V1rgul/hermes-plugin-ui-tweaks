@@ -6,7 +6,7 @@ REPO=$(CDPATH= cd -- "$HERE/../.." && pwd -P)
 STATE=$REPO/.test-webapp
 PROFILE=$STATE/browser-profile
 RUNTIME=${UI_WEBAPP_RUNTIME:-$(command -v podman >/dev/null 2>&1 && printf podman || printf docker)}
-IMAGE=${UI_WEBAPP_IMAGE:-docker.io/nousresearch/hermes-agent:v0.23.0}
+IMAGE=${UI_WEBAPP_IMAGE:-docker.io/nousresearch/hermes-agent:latest}
 # Include the full checkout path: equally named worktrees in different repos must not share a container.
 NAME=ui-tweaks-$(printf '%s' "$REPO" | cksum | cut -d ' ' -f 1)
 LABEL=ui-tweaks.checkout
@@ -102,7 +102,8 @@ case "${1:-}" in
 setup)
 	if exists; then start; else
 		mkdir -p "$STATE/data"
-		"$RUNTIME" image inspect "$IMAGE" >/dev/null 2>&1 || "$RUNTIME" pull "$IMAGE"
+		# A new container gets the current release: a cached floating tag would otherwise stay on an old one. Offline, fall back to the cached image.
+		"$RUNTIME" pull "$IMAGE" >/dev/null || "$RUNTIME" image inspect "$IMAGE" >/dev/null 2>&1 || fail "Cannot pull $IMAGE"
 		# Configure only the dedicated test home through the native CLI. Never clone a real Hermes home.
 		"$RUNTIME" run --rm -v "$STATE/data:/opt/data:Z" "$IMAGE" sh -c 'hermes config set webapp.enabled true && hermes config set webapp.host 127.0.0.1 && hermes config set webapp.port 9121 && hermes config set telemetry.shared_metrics.enabled false && hermes config set telemetry.shared_metrics.send false' >/dev/null
 		"$RUNTIME" run -d --name "$NAME" --label "$LABEL=$REPO" -v "$STATE/data:/opt/data:Z" -p "127.0.0.1:$PORT:9120" --entrypoint sh "$IMAGE" -c '/command/s6-setuidgid hermes /opt/hermes/.venv/bin/python -c "$1" & exec /opt/hermes/docker/entrypoint-dispatch.sh gateway run' sh "$FORWARD" >/dev/null
